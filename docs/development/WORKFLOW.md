@@ -36,7 +36,7 @@ orca agent launch --environment local --worktree 'branch:orca/coordinator' \
 4. 별도 리뷰 세션이나 Claude Code `reviewer`에 기준 브랜치, diff, 인수 기준, 검증 결과를 넘깁니다. 리뷰어가 확인한 문제를 개발 세션에서 고치고 관련 검사를 다시 실행합니다.
 5. [커밋·이슈·PR 작성 규칙](PR-ISSUE-GUIDE.md)에 맞춰 Draft PR을 올립니다. 마스터는 최종 커밋의 Claude·Codex 완료 보고 두 건을 [병합 스크립트](../../scripts/orca_merge.py)로 검증합니다. GitHub에서 `TB CI`, `tb/review-claude`, `tb/review-codex`가 통과해야 squash 병합됩니다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 제품 결정이 남은 PR은 사람의 확인을 받습니다. 첫 실기기 테스트에서 기기 조작이 필요한 시점에 iPhone 연결을 요청합니다.
 
-두 독립 리뷰의 판정이나 중요한 지적이 갈리면 마스터가 양쪽 근거를 정리해 Claude와 Codex에 같은 쟁점을 보냅니다. 두 에이전트가 동일한 커밋을 읽기 전용으로 다시 검토합니다. 재검토가 기록된 커밋에는 병합 실행기가 재검토 두 건의 `PASS`를 요구합니다. 쟁점이 해소된 근거와 최종 판정은 PR에 남깁니다.
+두 독립 리뷰의 판정이나 중요한 지적이 갈리면 마스터가 양쪽 근거를 정리해 Claude와 Codex에 같은 쟁점을 보냅니다. 먼저 병합 실행기로 Draft PR 번호와 최종 SHA의 재검토 Run을 등록한 뒤 두 리뷰를 시작합니다. 병합 실행기는 그 Run의 재검토 `PASS` 두 건을 요구합니다. 쟁점이 해소된 근거와 최종 판정은 PR에 남깁니다.
 
 ## 앱을 만든 뒤 연결할 항목
 
@@ -48,6 +48,8 @@ orca agent launch --environment local --worktree 'branch:orca/coordinator' \
 ## 마스터 병합 실행기 (맥에 1회 설치)
 
 마스터는 절대 경로에 설치된 `/opt/homebrew/bin/tb-orca-merge`만 호출합니다. 설치와 갱신은 검토를 마치고 보호된 `origin/main`에 병합된 버전의 `scripts/orca_merge.py`로 진행합니다. 작업 브랜치의 스크립트를 GitHub 쓰기 권한으로 실행하지 않습니다. Mac을 바꾸거나 그 파일을 변경한 운영 PR을 병합했으면 새 버전을 다시 설치합니다.
+
+이견 재검토를 등록하면 실행기가 이 Mac의 `~/Library/Application Support/tb-orca-merge/rechecks/`에 PR 번호, 커밋 SHA, Orca Run의 연결을 기록합니다. 작업을 재개할 때 해당 Run의 두 재검토 Task를 이어서 사용합니다.
 
 GitHub Actions가 이름이 `TB CI`인 검사를 게시합니다. Claude·Codex 판정은 마스터의 GitHub 계정으로 별개의 커밋 상태에 게시하며, Orca 작업자 두 명의 완료 기록과 최종 SHA를 대조합니다. 리뷰 공급자 두 곳이 GitHub에 각각 로그인하는 방식은 사용하지 않습니다.
 

@@ -1,11 +1,16 @@
+import io
 import json
 import subprocess
+import tempfile
 import unittest
+from argparse import Namespace
+from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from orca_merge import (
-    Blocked, merge_or_queue, protected_paths, verify_branch_rules, verify_pr,
-    verify_review, verify_review_pair,
+    Blocked, merge_or_queue, process_pr, protected_paths, review_record,
+    verify_branch_rules, verify_pr, verify_review, verify_review_pair,
 )
 
 
@@ -53,11 +58,13 @@ class MergeGateTests(unittest.TestCase):
             "task_other": {"spec": f"TB-REVIEW-RECHECK {'2' * 40}"},
         }
         verify_review_pair(self.sha, initial, tasks)
+        with self.assertRaises(Blocked):
+            verify_review_pair(self.sha, initial, tasks, must_recheck=True)
 
     def test_recheck_supersedes_the_initial_pair_as_soon_as_it_is_recorded(self):
         initial = {"claude": "task_1", "codex": "task_2"}
         recheck = {"claude": "task_3", "codex": "task_4"}
-        marked = {"spec": f"TB-REVIEW-TARGET {self.sha}\nTB-REVIEW-RECHECK {self.sha}"}
+        marked = {"spec": f"TB-REVIEW-TARGET {self.sha}\n  TB-REVIEW-RECHECK {self.sha} "}
         tasks = {"task_1": {}, "task_2": {}, "task_3": marked}
 
         with self.assertRaises(Blocked):
@@ -73,6 +80,38 @@ class MergeGateTests(unittest.TestCase):
         tasks["task_extra"] = marked
         with self.assertRaises(Blocked):
             verify_review_pair(self.sha, recheck, tasks)
+
+    @patch("orca_merge.orca")
+    @patch("orca_merge.verify_branch_rules")
+    @patch("orca_merge.github")
+    @patch("orca_merge.run")
+    def test_registration_binds_the_pr_head_to_one_run_across_invocations(
+        self, run, github, verify_branch_rules, orca,
+    ):
+        pr = dict(state="OPEN", isCrossRepository=False, baseRefName="main",
+                  headRefName="orca/example", headRefOid=self.sha, isDraft=True, url="https://example.invalid")
+        run.return_value = json.dumps(pr)
+        args = Namespace(pr=6, sha=self.sha, run="run_recheck", require_recheck=True)
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "orca_merge.REVIEW_RECORDS", Path(temporary)
+        ), redirect_stdout(io.StringIO()):
+            with review_record(args.pr, self.sha) as record:
+                process_pr(args, record)
+            with review_record(args.pr, self.sha) as record:
+                process_pr(args, record)
+            orca.assert_called_once_with("run-show", "--id", "run_recheck")
+
+            old_run = Namespace(pr=args.pr, sha=self.sha, run="run_initial", require_recheck=False)
+            with review_record(args.pr, self.sha) as record, self.assertRaisesRegex(
+                Blocked, "run registered"
+            ):
+                process_pr(old_run, record)
+            orca.assert_called_once()
+
+            with review_record(args.pr + 1, self.sha) as record:
+                self.assertEqual(record.read(), "")
+            with review_record(args.pr, "2" * 40) as record:
+                self.assertEqual(record.read(), "")
 
     def test_branch_rules_require_the_github_actions_publisher(self):
         checks = [dict(context="TB CI", integration_id=15368),
