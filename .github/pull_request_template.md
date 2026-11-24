@@ -52,7 +52,7 @@
 ## 독립 리뷰 결과
 
 - 검토한 커밋: <!-- 해시. 이 PR의 마지막 커밋과 같아야 함 -->
-- 리뷰어: <!-- Codex(gpt-6.2-sol, high) · Claude(sonnet-5-5, high) / 단일 리뷰면 사유 -->
+- 리뷰어: <!-- Codex(gpt-6.2-sol, high) · Claude(sonnet-5-5, high) / 최종 커밋 SHA -->
 - 라운드: <!-- n / 3 -->
 
 | 구분 | 건수 | 요약 |

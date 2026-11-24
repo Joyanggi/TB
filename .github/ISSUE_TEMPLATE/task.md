@@ -50,4 +50,4 @@ title: "[작업] "
 
 - [ ] 인수 기준 모두 충족
 - [ ] 검증 결과와 미실행 항목을 PR에 기록
-- [ ] 독립 리뷰(Codex·Claude 병렬; 단일 리뷰로 끝낼 수 있는 범위는 `.claude/skills/orchestrate/SKILL.md` 기준) 통과
+- [ ] 최종 커밋이 Codex와 Claude의 독립 리뷰를 모두 통과

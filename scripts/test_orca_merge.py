@@ -25,6 +25,8 @@ class MergeGateTests(unittest.TestCase):
             ("claude", f"TB-REVIEW {self.sha} BLOCK"),
             ("claude", report["body"] + "\n" + report["body"]),
             ("claude", report["body"] + "\nReview is inconclusive."),
+            ("claude", " " + report["body"]),
+            ("claude", report["body"] + "\n\n"),
         ]:
             with self.subTest(role=role, body=body), self.assertRaises(Blocked):
                 tasks["task_1"]["result"] = json.dumps({**report, "body": body})
@@ -53,7 +55,11 @@ class MergeGateTests(unittest.TestCase):
     def test_policy_files_are_gated_even_when_renamed(self):
         pages = [[{"filename": "README.md"}, {"filename": "example.yml",
                                               "previous_filename": ".github/workflows/tb-ci.yml"}]]
-        self.assertEqual({str(path) for path in protected_paths(pages)}, {".github/workflows/tb-ci.yml"})
+        self.assertEqual(protected_paths(pages, 2), {".github/workflows/tb-ci.yml"})
+        self.assertEqual(protected_paths([[{"filename": ".GitHub/TB.md"}]], 1), {".GitHub/TB.md"})
+        for count in (None, 1, 3, 3000):
+            with self.subTest(count=count), self.assertRaises(Blocked):
+                protected_paths(pages, count)
 
 
 if __name__ == "__main__":

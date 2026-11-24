@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import subprocess
+import unicodedata
 from pathlib import PurePosixPath
 
 
@@ -64,24 +65,30 @@ def verify_review(run_id, sha, role, dispatch_id, worker, tasks):
         or f"TB-REVIEW-TARGET {sha}" not in (task.get("spec") or "").splitlines()
     ):
         raise Blocked(f"{role} did not return an attributable read-only report for this SHA.")
-    lines = [line.strip() for line in (report.get("body") or "").splitlines() if line.strip()]
+    lines = (report.get("body") or "").splitlines()
     decision = f"TB-REVIEW {sha} PASS"
-    markers = [line for line in lines if line.startswith("TB-REVIEW ")]
+    markers = [line for line in lines if line.lstrip().startswith("TB-REVIEW ")]
     if not lines or lines[-1] != decision or markers != [decision]:
         raise Blocked(f"{role} did not pass the requested commit.")
     return task["id"]
 
 
-def protected_paths(pages):
+def protected_paths(pages, expected_count):
+    changes = [change for page in pages for change in page]
+    # GitHub returns at most 3,000 files, irrespective of pagination.
+    if not isinstance(expected_count, int) or not 0 < expected_count < 3000 or len(changes) != expected_count:
+        raise Blocked("The complete PR file list could not be verified.")
+    guarded = {PurePosixPath(item.casefold()) for item in PROTECTED}
     paths = set()
-    for page in pages:
-        for change in page:
-            for field in ("filename", "previous_filename"):
-                if change.get(field):
-                    paths.add(PurePosixPath(change[field]))
-    return paths.intersection(map(PurePosixPath, PROTECTED)) | {
-        path for path in paths if any(PurePosixPath(item) in path.parents for item in PROTECTED)
-    }
+    for change in changes:
+        for field in ("filename", "previous_filename"):
+            raw_path = change.get(field)
+            if not raw_path:
+                continue
+            path = PurePosixPath(unicodedata.normalize("NFC", raw_path).casefold())
+            if path in guarded or guarded.intersection(path.parents):
+                paths.add(raw_path)
+    return paths
 
 
 def verify_pr(pr, sha):
@@ -126,7 +133,7 @@ def main():
     def get_pr():
         return json.loads(run(
             "gh", "pr", "view", str(args.pr), "--repo", REPO, "--json",
-            "baseRefName,headRefName,headRefOid,isCrossRepository,isDraft,state,url",
+            "baseRefName,headRefName,headRefOid,isCrossRepository,isDraft,state,url,changedFiles",
         ))
 
     try:
@@ -146,11 +153,10 @@ def main():
             return
         if github("user").get("login", "").casefold() != REPO.split("/", 1)[0].casefold():
             raise Blocked("Only the configured coordinator GitHub account may publish the checks.")
-        paths = protected_paths(github(
-            f"repos/{REPO}/pulls/{args.pr}/files?per_page=100", "--paginate", "--slurp"
-        ))
+        pages = github(f"repos/{REPO}/pulls/{args.pr}/files?per_page=100", "--paginate", "--slurp")
+        paths = protected_paths(pages, pr.get("changedFiles"))
         if paths:
-            raise Blocked("Automation policy changes require owner review: " + ", ".join(map(str, sorted(paths))))
+            raise Blocked("Automation policy changes require owner review: " + ", ".join(sorted(paths)))
         pr = get_pr()
         verify_pr(pr, args.sha)
         for role, task_id in task_ids.items():

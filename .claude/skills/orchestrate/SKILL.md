@@ -65,7 +65,7 @@ argument-hint: "[아이디어 또는 작업]"
 5. 구현 보고를 받으면 `task-list --ready --brief`로 진행 가능한 작업을 갱신한다.
 6. **PR 발행**: 첫 검증 가능한 커밋을 `git push origin <SHA>:refs/heads/orca/<작업명>`으로 보내고 `gh pr create --repo Joyanggi/TB --base main --head orca/<작업명> --draft --title ... --body-file ...`로 Draft PR을 만든다. 이미 같은 브랜치의 PR이 있으면 재사용한다. `docs/development/PR-ISSUE-GUIDE.md`와 템플릿으로 내용·검증·미실행 항목·사람의 결정이 필요한 사항을 정리한다. 공개 PR 본문에는 비밀값·개인정보를 넣지 않는다. 같은 브랜치에 새 커밋을 푸시할 때마다 기존 리뷰 판정을 무효로 하고 새 SHA를 리뷰한다.
 7. 여러 브랜치를 통합하는 경우 먼저 별도 통합 worktree에서 정확한 커밋들을 합치고, 합친 결과에 대해 검사와 최종 리뷰(위 병렬 리뷰)를 한다. 중요 지적은 구현 작업자에게 전달하고 변경된 검사와 리뷰를 다시 실행한다. 현재 권한 및 환경에서 확인하지 못한 것은 결과에 명시한다. 통합한 최종 SHA를 PR에 올리고 그 SHA에 대해 두 리뷰를 받는다.
-8. **자동 병합**: 열린 제품 결정과 미통과 검사가 없고 두 리뷰가 같은 SHA를 통과시켰으면 마스터는 맥에 설치된 검토 완료 병합 실행기로 `tb-orca-merge --pr <번호> --sha <전체 SHA> --run <Run ID> --claude <Dispatch ID> --codex <Dispatch ID>`를 실행한다. 스크립트는 보존된 두 보고와 GitHub 보호 규칙을 검사하고 상태 체크를 게시한 뒤 squash 자동 병합을 요청한다. GitHub가 CI도 통과한 경우에만 병합한다. `main` 변경으로 작업 브랜치가 뒤처지면 최신 `origin/main`을 반영하고 새 SHA에서 다시 검사·리뷰한다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 별도 사람 결정이 필요한 PR은 Draft로 남기고 사람에게 넘긴다. 배포는 별도 요청에 따른다.
+8. **자동 병합**: 열린 제품 결정과 미통과 검사가 없고 두 리뷰가 같은 SHA를 통과시켰으면 마스터는 맥에 설치된 검토 완료 병합 실행기로 `/opt/homebrew/bin/tb-orca-merge --pr <번호> --sha <전체 SHA> --run <Run ID> --claude <Dispatch ID> --codex <Dispatch ID>`를 실행한다. 스크립트는 보존된 두 보고와 GitHub 보호 규칙을 검사하고 상태 체크를 게시한 뒤 squash 자동 병합을 요청한다. GitHub가 CI도 통과한 경우에만 병합한다. `main` 변경으로 작업 브랜치가 뒤처지면 최신 `origin/main`을 반영하고 새 SHA에서 다시 검사·리뷰한다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 별도 사람 결정이 필요한 PR은 Draft로 남기고 사람에게 넘긴다. 배포는 별도 요청에 따른다.
 
 ## 완료 보고와 재개
 
