@@ -3,6 +3,7 @@ name: TrustBite
 on:
   pull_request:
     branches: [main]
+    types: [opened, reopened, synchronize, edited]
   push:
     branches: [main]
 
@@ -23,6 +24,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: 커밋·PR 제목 검사
+        if: github.event_name == 'pull_request'
+        run: python3 -B .github/scripts/check_git_titles.py "$GITHUB_EVENT_PATH"
       - name: Check diff and merge policy
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
