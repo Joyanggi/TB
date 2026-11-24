@@ -16,3 +16,25 @@
 - 프로젝트가 생성한 코드와 파일 배치를 기준으로 고정된 규칙이 필요한 곳에 `.claude/rules/`를 둡니다.
 - 검증 명령이 반복되면 `/verify`를 갱신하고 필요할 때 `scripts/`와 GitHub Actions에 연결합니다. 팀 공통 권한이나 훅은 실제로 필요한 시점에 `.claude/settings.json`에 적용합니다.
 - 개발 환경은 현재 맥의 자원을 고려해 진행합니다. 첫 iOS 빌드에서 실기기를 사용하고, 다른 기기나 시뮬레이터 설정은 그 검증 계획에 맞춰 추가합니다.
+
+## Codex 작업자 설정 (저장소 밖, 1회)
+
+Codex 작업자는 샌드박스 때문에 `orca orchestration send`(worker_done 보고)가 차단돼 매번 승인을 요구할 수 있습니다. 이를 막으려고 `~/.codex/rules/orca-orchestration.rules`에 아래 규칙을 둡니다. 이 파일은 개인 설정이라 저장소에 포함하지 않으며, 새 Mac에서는 다시 만들어야 합니다.
+
+```starlark
+prefix_rule(
+    pattern = ["orca", "orchestration", "send"],
+    decision = "allow",
+    justification = "Orca worker reports to its coordinator",
+)
+prefix_rule(
+    pattern = ["orca", "orchestration", "ask"],
+    decision = "allow",
+    justification = "Orca worker questions to its coordinator",
+)
+```
+
+- 허용 범위는 보고(`send`)와 질문(`ask`) 두 명령뿐입니다. 다른 `orca` 명령은 허용하지 않습니다.
+- 확인: `codex execpolicy check --rules ~/.codex/rules/orca-orchestration.rules -- orca orchestration send --from t --type worker_done`가 `allow`를 반환해야 합니다.
+- 2026-11-24에 적용 후 Codex 작업자(gpt-6.2-sol, high)가 승인 프롬프트 없이 `worker_done`을 보내는 것을 확인했습니다.
+- 규칙이 없거나 동작하지 않으면 오케스트레이션 절차의 "Codex 보고 전달 막힘" 우회(마스터가 `worker-read`로 보고 확보)를 사용합니다.
