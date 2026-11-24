@@ -65,7 +65,7 @@ supabase/tests/          DB 정책·집계 테스트
 auth.users ─1:1─ profiles(id, display_name)
 groups(id, name, kind[group|couple], max_members, created_by)
 group_members(group_id, user_id, role[admin|member], joined_at)   PK(group_id, user_id)
-group_invites(id, group_id, token_hash, expires_at, max_uses, used_count, revoked_at)
+group_invites(id, group_id, created_by, token_hash, expires_at, max_uses, used_count, revoked_at)
 restaurants(id, provider[naver], provider_place_key, provider_place_key_version, name, address, road_address,
             lat, lng, category, coord_source, coord_updated_at)     UNIQUE(provider, provider_place_key)
 reviews(id, user_id, restaurant_id, group_id NULL,
@@ -73,6 +73,7 @@ reviews(id, user_id, restaurant_id, group_id NULL,
         visit_verified, verification_status, verified_at, verification_rule_version,
         created_at, updated_at)                                     UNIQUE(user_id, client_request_id)
 place_candidates(id, user_id, payload, expires_at)               서버 전용 임시 보관(클라이언트 접근 없음)
+place_selections(user_id, restaurant_id, selected_at)             select_place가 기록, submit_review가 확인(24시간 [제안])
 ```
 
 핵심 설계 결정:
@@ -90,12 +91,12 @@ place_candidates(id, user_id, payload, expires_at)               서버 전용 �
 | --- | --- | --- |
 | profiles | 본인 + 같은 그룹 멤버의 표시 이름만 | 본인 |
 | groups, group_members | 그 그룹의 현재 멤버 | 직접 쓰기 없음. `create_group`, `leave_group` 등 RPC |
-| group_invites | 그룹 관리자의 목록 조회. 테이블 전체 SELECT를 부여하지 않고 `token_hash`를 뺀 열에만 SELECT 부여(어떤 클라이언트 역할도 해시를 읽을 수 없음) | 함수로만 생성(그룹 멤버)·폐기(생성자·그룹 관리자) |
+| group_invites | 그룹 관리자와 생성자(자기가 만든 초대)의 조회. 테이블 전체 SELECT를 부여하지 않고 `token_hash`를 뺀 열에만 SELECT 부여(어떤 클라이언트 역할도 해시를 읽을 수 없음) | 함수로만 생성(그룹 멤버)·폐기(생성자·그룹 관리자). 생성자가 탈퇴하거나 계정을 삭제하면 그 초대는 자동 폐기 |
 | restaurants | 사용자가 평가했거나 자기가 볼 수 있는 평가가 가리키는 식당만(그 밖의 행은 직접 조회 불가) | `select_place` 함수(서버)만 |
-| reviews | `authenticated`는 **공개 열**(`id`, `user_id`, `restaurant_id`, `group_id`, `taste`, `value`, `mood`, `tags`, `created_at`, `updated_at`)만 SELECT하며, 행은 (작성자 본인) 또는 (`group_id`가 있고 호출자와 작성자가 모두 그 그룹의 현재 멤버)일 때만 보인다. **작성자 전용 열**(`client_request_id`, `visit_verified`, `verification_status`, `verified_at`, `verification_rule_version`)은 base 테이블의 SELECT 권한을 회수하고 `my_reviews` 뷰(`auth.uid() = user_id` 필터)로만 읽는다 | `authenticated`에는 INSERT·UPDATE 권한이 없다(`submit_review`, `update_review` 함수만 쓴다). DELETE는 작성자 본인만 |
+| reviews | `authenticated`는 **공개 열**(`id`, `user_id`, `restaurant_id`, `group_id`, `taste`, `value`, `mood`, `tags`, `created_at`, `updated_at`)만 SELECT하며, 행은 (작성자 본인) 또는 (`group_id`가 있고 호출자와 작성자가 모두 그 그룹의 현재 멤버)일 때만 보인다. **작성자 전용 열**(`client_request_id`, `visit_verified`, `verification_status`, `verified_at`, `verification_rule_version`)은 base 테이블의 SELECT 권한을 회수하고 `my_reviews` 뷰로만 읽는다. 뷰는 **소유자 권한으로 실행**(`security_invoker` 끔)하고 `auth.uid() = user_id` 필터와 `security_barrier`를 두며 `anon`·`public` 권한을 회수한다(대안: `SECURITY DEFINER` 함수). 테이블 권한은 기본 부여를 모두 회수한 뒤 공개 열에만 SELECT를 다시 부여한다(순서를 틀리면 전체 열이 열리므로 단계 0 SQL 테스트로 확인) | `authenticated`에는 INSERT·UPDATE 권한이 없다(`submit_review`, `update_review` 함수만 쓴다). DELETE는 작성자 본인만 |
 
 - 멤버 판정은 `is_group_member(gid)` 보안 정의 함수(정책 재귀 방지). **모든 `SECURITY DEFINER` 함수는 `search_path`를 고정하고 `anon`·`public`의 실행 권한을 회수**하며, JWT의 `auth.uid()`와 사용자 존재를 검사한다(삭제된 계정의 만료 전 토큰 차단, F-002).
-- **열 권한은 역할 단위이고 RLS는 행 단위**라서 같은 `authenticated` 역할인 작성자와 다른 멤버를 구분하는 일은 뷰(`my_reviews`)와 함수가 한다. 작성자 전용 열을 이름으로 직접 SELECT하면 권한 오류(permission denied)다.
+- **열 권한은 역할 단위이고 RLS는 행 단위**라서 같은 `authenticated` 역할인 작성자와 다른 멤버를 구분하는 일은 뷰(`my_reviews`)와 함수가 한다. 작성자 전용 열을 이름으로 직접 SELECT하면 권한 오류(permission denied)다. 그룹 멤버는 서로의 개별 점수·태그를 공개 열로 직접 볼 수 있으며 이는 "각자의 평가를 한곳에 모은다"는 PRD 취지에 따른 의도다. `get_ranking`은 멤버별 평균에 `user_id`가 필요해 호출자 권한으로 실행한다.
 - **탈퇴한 멤버의 평가**: 작성자 본인은 계속 읽을 수 있지만(내 랭킹) 그룹 정책의 읽기 조건은 작성자의 **현재** 멤버십을 요구하고, `get_ranking`의 그룹 범위는 호출자와 집계 대상 양쪽의 현재 멤버십을 모두 확인한다.
 - **내 랭킹 질의는 `user_id = auth.uid()`를 명시**해야 한다. 정책상 다른 멤버의 그룹 평가도 읽을 수 있으므로 정책만 믿고 개인 랭킹을 계산하면 남의 평가가 섞인다(테스트 항목).
 - 서비스 키는 서버(Edge Function) 환경변수에만 두고 앱에는 공개 키(anon)만 넣는다.
@@ -105,12 +106,12 @@ place_candidates(id, user_id, payload, expires_at)               서버 전용 �
 | 함수 | 역할 |
 | --- | --- |
 | `place-search` (Edge Function) | 입력 분류, 공급자 호출, 결과를 `place_candidates`에 임시 저장하고 후보 ID와 표시 정보 반환. JWT 검증과 사용자별 호출 제한, `restaurants`에는 저장하지 않음 |
-| `select_place(candidate_id)` | 후보의 사용자 ID·만료를 검사한 뒤 서버에 저장된 원본으로 `restaurants`를 upsert하고 식당 ID와 표시 정보를 반환(재선택은 멱등, 사용자별 호출 제한). 클라이언트가 보낸 이름·좌표는 사용하지 않음 |
-| `submit_review(restaurant_id, group_id, scores, tags, request_id, location?)` | 멤버십·점수 검증, 멱등 저장, 방문 인증 판정(좌표는 저장하지 않음) |
+| `select_place(candidate_id)` | 후보의 사용자 ID·만료를 검사한 뒤 서버에 저장된 원본으로 `restaurants`를 upsert하고 식당 ID와 표시 정보를 반환(재선택은 멱등, 사용자별 호출 제한). `place_selections`에 선택 기록을 남김. 클라이언트가 보낸 이름·좌표는 사용하지 않음 |
+| `submit_review(restaurant_id, group_id, scores, tags, request_id, location?)` | 멤버십·점수 검증, 멱등 저장, 방문 인증 판정(좌표는 저장하지 않음). `place_selections`에 최근(24시간 [제안]) 선택 기록이 있는 식당만 허용 |
 | `update_review(review_id, scores, tags)` | 작성자 본인의 점수·태그 수정(그룹·배지·판정 열 변경 불가) |
 | `get_ranking(scope_type, group_id?)` | 범위별 순위 집계(호출자 권한으로 실행해 정책 적용) |
 | `create_group`, `create_invite`, `preview_invite`, `accept_invite`, `leave_group` | 그룹 수명주기. 초대 토큰은 128비트 무작위이며 서버에는 해시만 저장. `preview_invite`는 유효한 토큰에 한해 그룹 이름만 반환하고 `accept_invite`는 정원·사용 횟수·멤버 추가를 한 트랜잭션으로 처리. 두 함수 모두 사용자별 호출 제한을 두고 존재하지 않는 값은 모두 같은 "사용할 수 없는 초대"로 응답 |
-| `delete_account` (Edge Function) | 요청 본문의 사용자 ID는 받지 않고 **서버가 JWT를 검증(`auth.getUser`)해 확인한 본인만** 삭제하며 최근 재인증(로그인 후 N분 이내)을 요구한다 [제안]. 순서: ①제공자 연결 해제(Apple 토큰 해지 등) → ②앱 데이터·멤버십 정리(마지막 멤버면 그룹 삭제, 유일한 관리자면 가장 오래된 멤버가 관리자 승계) → ③Auth 사용자 삭제. 각 단계는 멱등이라 중간에 실패해도 같은 요청을 재시도하면 이어서 끝나고 응답을 잃어도 성공으로 끝난다. 삭제 뒤 만료 전 JWT는 함수가 사용자 존재를 검사해 거부한다 |
+| `delete_account` (Edge Function) | 요청 본문의 사용자 ID는 받지 않고 **서버가 JWT를 검증(`auth.getUser`)해 확인한 본인만** 삭제하며 최근 재인증(로그인 후 N분 이내)을 요구한다 [제안]. 순서: ①제공자 연결 해제(Apple 토큰 해지 등) → ②앱 데이터·멤버십 정리(마지막 멤버면 그룹 삭제, 유일한 관리자면 가장 오래된 멤버가 관리자 승계) → ③Auth 사용자 삭제. 삭제 요청은 `account_deletions`(사용자 ID, 상태, 요청 시각)에 먼저 기록하고, 기록이 있는 동안 모든 쓰기 함수는 그 사용자의 쓰기를 거부한다. 각 단계는 멱등이라 JWT가 유효한 동안 같은 요청을 재시도하면 이어서 끝난다. Auth 삭제(③) 뒤에는 JWT 검증이 불가능하므로 **앱은 "사용자 없음" 응답을 삭제 성공으로 간주**하고 로컬 데이터를 지운다. 마지막 멤버 판정·관리자 승계는 그룹 행 잠금(`FOR UPDATE`) 안에서 하며 `joined_at`이 같으면 `user_id` 순으로 승계한다. 삭제 대상에는 `place_candidates`·`place_selections`·호출 제한 기록·본인이 만든 초대가 포함된다. Apple 토큰 해지 자격(인가 코드 등)은 저장하지 않고 삭제 요청 때마다 앱이 새로 받아 전달한다 [확인 필요]. 최근 재인증 N은 10분 [제안]이며 측정 수단은 단계 1에서 확인한다. 삭제 뒤 만료 전 JWT는 함수가 사용자 존재를 검사해 거부한다 |
 
 ## 로그인과 계정
 
@@ -137,7 +138,7 @@ place_candidates(id, user_id, payload, expires_at)               서버 전용 �
 | --- | --- | --- |
 | 원본 좌표(위도·경도) | 판정에만 사용 | **보관·로그 안 함** |
 | 정확도(m) | 판정 조건(≤100m [제안]) | 보관 안 함 |
-| 측정 경과 시간 | 판정 조건(측정 후 60초 이내 [제안]). 클라이언트 시계 대신 앱이 보고하는 경과 초와 서버 수신 시각으로 계산 | 보관 안 함 |
+| 측정 경과 시간 | 판정 조건(측정 후 60초 이내 [제안]). 클라이언트 시계 대신 앱이 보고하는 `age_ms`(밀리초)와 서버 수신 시각으로 계산. 음수·누락·60,000ms 초과는 `stale`, 정확히 60,000ms는 허용 | 보관 안 함 |
 | 식당 좌표 | 공급자 제공 좌표 | 보관(`restaurants.lat/lng`), 출처를 `coord_source`(provider, 조회 시각)로 기록 |
 | 판정 결과 | `visit_verified`, `verification_status`(verified·out_of_range·permission_denied·low_accuracy·stale·no_coordinates·unavailable) | 보관(평가 행) |
 | 판정 시각·기준 버전 | 기준 변경 시 과거 결과 해석용 | 보관(`verified_at`, `verification_rule_version`) |
@@ -150,7 +151,7 @@ place_candidates(id, user_id, payload, expires_at)               서버 전용 �
 
 ```
 앱 입력 → (debounce 500ms, 이전 요청 취소) → place-search(query, anchor?)
-   서버: 네이버 지역 검색 호출(최대 5건, 제목 태그 제거) → type 판정(area|place) → place면 후보 [{candidateId,name,address,category,distance?}] 반환(저장하지 않음). 후보 선택 시 `select_place`가 식당 upsert 후 restaurantId 반환
+   서버: 네이버 지역 검색 호출(최대 5건, 제목 태그 제거) → type 판정(area|place) → place면 후보 [{candidateId,name,address,category,distance?}] 반환(서버 전용 `place_candidates`에 임시 저장하고 `restaurants`에는 저장하지 않음). 후보 선택 시 `select_place`가 식당 upsert 후 restaurantId 반환
 앱: place → 후보 목록 / area → "‘○○’ 주변으로 이동" 행 / 빈 결과 → 메시지 / 실패 → 다시 시도
 확정(탭 또는 키보드 검색 키): place → 평가 화면, area → 검색 기준 위치 변경 후 주변 식당
 ```

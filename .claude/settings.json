@@ -70,10 +70,15 @@
       "Read(**/*.pem)",
       "Read(~/.netrc)",
       "Read(~/.config/gh/**)",
-      "Read(//Users/joyanggi/.ssh/**)",
-      "Read(//Users/joyanggi/.aws/**)",
-      "Read(//Users/joyanggi/.npmrc)",
-      "Read(//Users/joyanggi/.codex/auth.json)"
+      "Bash(git diff /*)",
+      "Bash(git diff * /*)",
+      "Bash(git diff ~*)",
+      "Bash(git diff * ~*)",
+      "Bash(git diff ../*)",
+      "Bash(git diff * ../*)",
+      "Read(**/*.key)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.git-credentials)"
     ],
     "ask": [
       "Edit(.claude/**)",
