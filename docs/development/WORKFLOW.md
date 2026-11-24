@@ -2,13 +2,37 @@
 
 **트바 마스터** Claude 세션(Opus)에 아이디어나 작업을 자연어로 맡깁니다. 마스터는 [오케스트레이션 절차](../../.claude/skills/orchestrate/SKILL.md)에 따라 개발 작업자(Claude Sonnet, 노력치 medium)에게 구현을 맡기고, 중요한 결정에만 승인을 요청합니다. 독립 리뷰는 모든 변경에 Codex(gpt-6.2-sol, high)와 Claude(Sonnet, high)를 서로의 결과를 보지 못하게 병렬로 돌리고, 마스터가 두 보고를 병합해 판단합니다. 이미지·아이콘 같은 그래픽 자산은 Codex(gpt-6.2-sol, high) 작업자가 만듭니다. 역할별 값은 오케스트레이션 절차의 표가 기준입니다.
 
+## 트바 마스터 열기
+
+Orca 사이드바에서 **Local Mac → TB → 트바 마스터**의 기존 Claude 채팅을 엽니다. 채팅 탭을 닫았다면 해당 워크트리의 **에이전트 세션 기록**에서 `트바 마스터`를 재개합니다. 터미널에서도 워크트리를 열 수 있습니다. Orca가 꺼져 있으면 먼저 `orca open`을 실행합니다.
+
+```sh
+orca worktree activate --environment local --worktree 'branch:orca/coordinator'
+```
+
+마스터에 목표를 한 문장으로 보내면 됩니다. 구체적인 완료 조건이 이미 있다면 함께 적습니다.
+
+```text
+/orchestrate 방문 인증 배지가 있는 리뷰와 없는 리뷰를 구분해 보여줘.
+```
+
+마스터 채팅을 처음부터 만들 때만 아래 명령을 사용합니다. 첫 프롬프트는 준비 확인만 요청하므로, 응답을 받은 뒤 작업을 보냅니다.
+
+```sh
+orca agent launch --environment local --worktree 'branch:orca/coordinator' \
+  --agent claude --model claude-opus-5-5 --effort high --surface chat --focus \
+  --prompt '트바 마스터로 준비해줘. CLAUDE.md와 AGENTS.md, /orchestrate 절차를 읽고 준비됐다고 알려줘. 작업 실행은 내 다음 요청부터 시작해줘.'
+```
+
+## 작업부터 병합까지
+
 아래 순서는 수동으로 작업할 때도 적용할 수 있습니다.
 
 1. Orca의 **Local Mac**에서 이 Git 저장소를 열고, 작업 목표와 요구사항 ID, 인수 기준을 정리합니다. 기능 단위로 GitHub Issue를 연결할 수 있습니다.
 2. 독립적으로 진행할 변경은 기능마다 별도 브랜치와 Orca worktree를 사용합니다. 같은 파일을 수정해야 하는 작업은 순서를 정합니다.
 3. 개발 작업은 변경 범위와 검증 결과를 남깁니다. 병렬로 실행할 경우 각 작업에 담당 범위와 기준 브랜치를 명시합니다.
 4. 별도 리뷰 세션이나 Claude Code `reviewer`에 기준 브랜치, diff, 인수 기준, 검증 결과를 넘깁니다. 리뷰어가 확인한 문제를 개발 세션에서 고치고 관련 검사를 다시 실행합니다.
-5. [Issue·PR 작성 규칙](PR-ISSUE-GUIDE.md)의 양식으로 Draft PR을 올립니다. 마스터는 최종 커밋의 Claude·Codex 완료 보고 두 건을 [병합 스크립트](../../scripts/orca_merge.py)로 검증합니다. GitHub에서 `TB CI`, `tb/review-claude`, `tb/review-codex`가 통과해야 squash 병합됩니다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 제품 결정이 남은 PR은 사람의 확인을 받습니다. 첫 실기기 테스트에서 기기 조작이 필요한 시점에 iPhone 연결을 요청합니다.
+5. [커밋·이슈·PR 작성 규칙](PR-ISSUE-GUIDE.md)에 맞춰 Draft PR을 올립니다. 마스터는 최종 커밋의 Claude·Codex 완료 보고 두 건을 [병합 스크립트](../../scripts/orca_merge.py)로 검증합니다. GitHub에서 `TB CI`, `tb/review-claude`, `tb/review-codex`가 통과해야 squash 병합됩니다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 제품 결정이 남은 PR은 사람의 확인을 받습니다. 첫 실기기 테스트에서 기기 조작이 필요한 시점에 iPhone 연결을 요청합니다.
 
 ## 앱을 만든 뒤 연결할 항목
 
