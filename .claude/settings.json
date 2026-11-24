@@ -21,7 +21,6 @@
       "Bash(orca orchestration inbox *)",
       "Bash(orca orchestration gate-create *)",
       "Bash(orca orchestration gate-list *)",
-      "Bash(orca orchestration gate-resolve *)",
       "Bash(git add -- *)",
       "Bash(git commit -m *)",
       "Bash(git cherry-pick *)",
@@ -33,13 +32,30 @@
       "Bash(npm ci)",
       "Bash(orca orchestration task-update *)",
       "Bash(orca orchestration worker-read *)",
-      "Bash(orca orchestration request-show *)"
+      "Bash(orca orchestration request-show *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git rev-parse *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git branch --show-current)"
     ],
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)",
       "Read(~/.codex/auth.json)",
-      "Read(~/.ssh/**)"
+      "Read(~/.ssh/**)",
+      "Bash(git commit --amend*)",
+      "Bash(git commit * --amend*)",
+      "Bash(git commit --no-verify*)",
+      "Bash(git commit * --no-verify*)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.p8)",
+      "Read(**/*.p12)",
+      "Read(~/.aws/**)",
+      "Read(~/.npmrc)"
     ]
   },
   "effortLevel": "high"

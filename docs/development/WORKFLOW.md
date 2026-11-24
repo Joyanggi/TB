@@ -14,7 +14,7 @@
 
 - `README.md`에 재현 가능한 설치, 실행, 검증 명령을 추가합니다.
 - 프로젝트가 생성한 코드와 파일 배치를 기준으로 고정된 규칙이 필요한 곳에 `.claude/rules/`를 둡니다.
-- 검증 명령이 반복되면 `/verify`를 갱신하고 필요할 때 `scripts/`와 GitHub Actions에 연결합니다. 팀 공통 권한이나 훅은 실제로 필요한 시점에 `.claude/settings.json`에 적용합니다.
+- 검증 명령이 반복되면 `/verify`를 갱신하고 필요할 때 `scripts/`와 GitHub Actions에 연결합니다. 오케스트레이션 권한(Orca 명령, 읽기 전용 git, 비밀 경로 읽기 거부)은 `.claude/settings.json`에 미리 적용했습니다. 앱 스크립트(`npm run lint/typecheck/test`) 권한은 앱 초기화 뒤 실제 스크립트에 맞춰 좁히고, 훅은 필요한 시점에 추가합니다.
 - 개발 환경은 현재 맥의 자원을 고려해 진행합니다. 첫 iOS 빌드에서 실기기를 사용하고, 다른 기기나 시뮬레이터 설정은 그 검증 계획에 맞춰 추가합니다.
 
 ## Codex 작업자 설정 (저장소 밖, 1회)
@@ -34,7 +34,7 @@ prefix_rule(
 )
 ```
 
-- 허용 범위는 보고(`send`)와 질문(`ask`) 두 명령뿐입니다. 다른 `orca` 명령은 허용하지 않습니다.
+- 허용 범위는 `orca orchestration send`(수신자·유형을 가리지 않음)와 `orca orchestration ask`뿐입니다. 다른 `orca` 명령은 허용하지 않습니다.
 - 확인: `codex execpolicy check --rules ~/.codex/rules/orca-orchestration.rules -- orca orchestration send --from t --type worker_done`가 `allow`를 반환해야 합니다.
 - 2026-11-24에 적용 후 Codex 작업자(gpt-6.2-sol, high)가 승인 프롬프트 없이 `worker_done`을 보내는 것을 확인했습니다.
 - 규칙이 없거나 동작하지 않으면 오케스트레이션 절차의 "Codex 보고 전달 막힘" 우회(마스터가 `worker-read`로 보고 확보)를 사용합니다.

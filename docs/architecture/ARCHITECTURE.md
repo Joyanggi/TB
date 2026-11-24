@@ -23,14 +23,14 @@
 
 | 기준 | Supabase + 네이버 | 대안: Firebase | 대안: 직접 만든 서버 |
 | --- | --- | --- | --- |
-| 비용 | 개발은 무료 요금제로 가능([확인 필요]: 2026-11 조사에서 활성 프로젝트 2개, DB 500MB, 비활성 1주 시 일시 중지, 출처마다 MAU 수치 상이). 베타부터 Pro(월 $25 수준) 권장. 네이버 검색 일 25,000회, 지도 과금·쿼터는 [확인 필요] | Firestore는 읽기 단위 과금이라 랭킹 화면 1회가 평가 수만큼 읽기로 청구될 수 있음 | 서버 호스팅·운영 인건비 |
+| 비용 | 개발은 무료 요금제로 가능([확인 필요]: 2026-11 조사에서 활성 프로젝트 2개, DB 500MB, 비활성 1주 시 일시 중지, 출처마다 MAU 수치 상이). 베타부터 Pro(월 $25 수준 [확인 필요]) 권장. 네이버 검색 일 25,000회 [확인 필요], 지도 과금·쿼터는 [확인 필요] | Firestore는 읽기 단위 과금이라 랭킹 화면 1회가 평가 수만큼 읽기로 청구될 수 있음 | 서버 호스팅·운영 인건비 |
 | 유지보수 | 관리형. SQL 마이그레이션 파일로 변경 이력, 서버 코드는 Edge Function 1~2개 | 관리형이나 집계를 클라이언트나 별도 함수에 구현해야 함 | 인증·배포·모니터링을 모두 직접 |
 | 그룹별 접근 제어 | **DB 정책이 행 단위로 멤버십을 검사**. 클라이언트 버그가 있어도 비멤버가 읽을 수 없고, 정책을 자동 테스트로 검증 가능 | 보안 규칙으로 가능하나 "멤버 전원의 평가 평균" 같은 조인·집계가 어려움 | 가능하나 정책 누락 위험을 직접 관리 |
 | 국내 식당 검색 | 네이버: 지역 검색 응답에 좌표 포함(문서 확인). 국내 장소 coverage 수준은 G3에서 검증 [확인 필요]. **단, 지역 검색은 결과 최대 5건·페이지 없음·반경/카테고리 필터 없음** → 후보 UX와 주변 탐색 범위에 제약(대응은 ADR-003) | (검색은 어느 쪽이든 외부 공급자) | 동일 |
 
 랭킹이 핵심 기능이고 랭킹은 "여러 사용자의 행을 범위별로 묶어 평균"하는 관계형 질의이므로 Postgres가 가장 자연스럽다.
 
-**네이버 선택의 약점과 대응**: ① 검색이 5건이라 동명이점 후보가 부족할 수 있다 → 지역명 조합 검색·안내, 단계 0 스파이크에서 품질 검증. ② 장소 고유 ID가 없다 → 이름+주소 해시 키. ③ 지도 라이브러리가 커뮤니티 유지이며 개발 빌드·New Architecture 전용이다 → 버전 고정, 업그레이드 전 스모크. ④ 검색 결과의 저장·표시 약관이 확인되지 않았다 → 구현 전 게이트(ADR-003 G1~G2). 상세는 [ADR-003](../decisions/003-식당-검색과-지도-공급자.md).
+**네이버 선택의 약점과 대응**: ① 검색이 5건이라 동명이점 후보가 부족할 수 있다 → 지역명 조합 검색·안내, 단계 0 스파이크에서 품질 검증. ② 장소 고유 ID가 없다 → 이름+주소 해시 키. ③ 지도 라이브러리가 커뮤니티 유지이며 개발 빌드·New Architecture 전용이다 [확인 필요: 현재 버전] → 버전 고정, 업그레이드 전 스모크. ④ 검색 결과의 저장·표시 약관이 확인되지 않았다 → 구현 전 게이트(ADR-003 G1~G2). 상세는 [ADR-003](../decisions/003-식당-검색과-지도-공급자.md).
 
 ## 앱 구성 [제안]
 
@@ -77,7 +77,7 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 핵심 설계 결정:
 
 1. **식당의 고유 ID**: 앱 자체의 `restaurants.id`(uuid). 외부 공급자의 `(provider, provider_place_key)`를 유니크 키로 두어 같은 장소는 한 행, 이름이 같아도 주소가 다르면 다른 행(동명이점 구분). **네이버 지역 검색에는 장소 고유 ID가 없으므로** `provider_place_key`는 정규화한 (이름 + 도로명 주소)의 해시로 직접 만든다(키 규칙은 [ADR-003](../decisions/003-식당-검색과-지도-공급자.md)). 공급자를 바꾸거나 키 규칙을 보정해도 `restaurants.id`와 평가는 유지하고 `provider` 열로 매핑한다.
-2. **식당 행은 서버만 쓴다**: 검색 Edge Function이 공급자 응답을 upsert하고 식당 ID를 반환한다. 클라이언트는 식당 ID만 안다 → 클라이언트가 가짜 좌표로 방문 인증을 받을 수 없다.
+2. **식당 행은 사용자가 선택할 때만, 서버만 쓴다**: 검색 Edge Function은 공급자 응답을 짧은 수명(예: 10분)의 후보 ID와 함께 반환하되 `restaurants`에 저장하지 않는다. 사용자가 후보를 선택하면 `select_place(candidate_id)`가 서버에서 공급자 응답을 upsert해 식당 ID를 반환한다. 선택하지 않은 후보는 저장되지 않으므로 약관 확인(ADR-003 G1) 전에 저장하는 범위가 최소다. 클라이언트는 후보 ID와 식당 ID만 안다 → 클라이언트가 가짜 좌표로 방문 인증을 받을 수 없다.
 3. **평가는 방문 1회 = 1행**. 재방문은 새 행(요청 ID가 다름). `group_id`가 NULL이면 개인 평가, 값이 있으면 그 그룹에 속한 평가. 한 평가는 최대 한 그룹에 속한다([ADR-004](../decisions/004-랭킹-집계와-그룹-평가-연결.md), Q1 제안).
 4. **중복 방지**: `UNIQUE(user_id, client_request_id)` + 저장 RPC가 충돌 시 기존 행을 반환(멱등).
 5. **방문 인증은 평가의 속성**: `reviews`의 열이며 별도 위치 테이블이 없다. 배지는 평가 단위이므로 그룹원에게 노출하는 쿼리에서 제외한다.
@@ -89,11 +89,12 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 | --- | --- | --- |
 | profiles | 본인 + 같은 그룹 멤버의 표시 이름만 | 본인 |
 | groups, group_members | 그 그룹의 현재 멤버 | 직접 쓰기 없음. `create_group`, `leave_group` 등 RPC |
-| group_invites | 그룹 멤버(토큰 해시는 노출하지 않음) | RPC로만 생성·폐기 |
-| restaurants | 인증된 사용자(전체 장소 정보는 공개 데이터) | Edge Function(서비스 키)만 |
-| reviews | `user_id = auth.uid()` **또는** (`group_id`가 있고 호출자가 그 그룹 멤버) | **직접 INSERT 금지**, `submit_review` RPC만. UPDATE·DELETE는 작성자만 |
+| group_invites | 그룹 관리자의 목록 조회. `token_hash` 열은 어떤 클라이언트 역할도 조회할 수 없음(열 권한 회수) | RPC로만 생성·폐기(관리자) |
+| restaurants | 사용자가 평가했거나 자기가 볼 수 있는 평가가 가리키는 식당만(그 밖의 행은 직접 조회 불가) | `select_place` 함수(서버)만 |
+| reviews | 작성자 본인은 모든 열. **다른 멤버는 `group_id`가 있고 호출자가 그 그룹의 현재 멤버이며 작성자도 현재 멤버인 행의 점수·태그·식당·작성 시각 열만**(배지·판정 사유·판정 시각·요청 ID 열은 작성자 전용 — 열 단위 권한 또는 작성자 전용 뷰로 강제) | 직접 INSERT 불가(`submit_review`). 직접 UPDATE는 점수·태그 열만 허용하고 `group_id`·배지·판정 열은 변경 불가(`update_review` 함수). DELETE는 작성자만 |
 
-- 멤버 판정은 `is_group_member(gid)` 보안 정의 함수(정책 재귀 방지).
+- 멤버 판정은 `is_group_member(gid)` 보안 정의 함수(정책 재귀 방지). **모든 `SECURITY DEFINER` 함수는 `search_path`를 고정하고 `anon`·`public`의 실행 권한을 회수**하며, JWT의 `auth.uid()`와 사용자 존재를 검사한다(삭제된 계정의 만료 전 토큰 차단, F-002).
+- **탈퇴한 멤버의 평가**: 작성자 본인은 계속 읽을 수 있지만(내 랭킹) 그룹 정책의 읽기 조건은 작성자의 **현재** 멤버십을 요구하고, `get_ranking`의 그룹 범위는 호출자와 집계 대상 양쪽의 현재 멤버십을 모두 확인한다.
 - **내 랭킹 질의는 `user_id = auth.uid()`를 명시**해야 한다. 정책상 다른 멤버의 그룹 평가도 읽을 수 있으므로 정책만 믿고 개인 랭킹을 계산하면 남의 평가가 섞인다(테스트 항목).
 - 서비스 키는 서버(Edge Function) 환경변수에만 두고 앱에는 공개 키(anon)만 넣는다.
 
@@ -101,11 +102,13 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 
 | 함수 | 역할 |
 | --- | --- |
-| `place-search` (Edge Function) | 입력 분류, 공급자 호출, 식당 upsert, 후보·식당 ID 반환 |
+| `place-search` (Edge Function) | 입력 분류, 공급자 호출, 후보 ID(짧은 수명)와 후보 정보 반환. JWT 검증과 사용자별 호출 제한, 식당 행은 저장하지 않음 |
+| `select_place(candidate_id)` | 선택한 후보를 서버에서 `restaurants`에 upsert하고 식당 ID 반환 |
 | `submit_review(restaurant_id, group_id, scores, tags, request_id, location?)` | 멤버십·점수 검증, 멱등 저장, 방문 인증 판정(좌표는 저장하지 않음) |
+| `update_review(review_id, scores, tags)` | 작성자 본인의 점수·태그 수정(그룹·배지·판정 열 변경 불가) |
 | `get_ranking(scope_type, group_id?)` | 범위별 순위 집계(호출자 권한으로 실행해 정책 적용) |
-| `create_group`, `create_invite`, `accept_invite`, `leave_group` | 그룹 수명주기, 정원·만료·중복 검사 |
-| `delete_account` | 본인 데이터·멤버십 정리 |
+| `create_group`, `create_invite`, `preview_invite`, `accept_invite`, `leave_group` | 그룹 수명주기. 초대 토큰은 128비트 무작위, 서버에는 해시만 저장. `preview_invite`는 유효한 토큰에 한해 그룹 이름만 반환. `accept_invite`는 정원·사용 횟수·멤버 추가를 한 트랜잭션으로 처리 |
+| `delete_account` (Edge Function) | 서비스 키로 인증 사용자·본인 데이터·멤버십 정리, 제공자 연결 해제(Apple 토큰 해지 등), JWT의 사용자 본인만 |
 
 ## 로그인과 계정
 
@@ -132,7 +135,7 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 | --- | --- | --- |
 | 원본 좌표(위도·경도) | 판정에만 사용 | **보관·로그 안 함** |
 | 정확도(m) | 판정 조건(≤100m [제안]) | 보관 안 함 |
-| 측정 시각 | 판정 조건(제출 60초 이내 [제안]) | 보관 안 함 |
+| 측정 경과 시간 | 판정 조건(측정 후 60초 이내 [제안]). 클라이언트 시계 대신 앱이 보고하는 경과 초와 서버 수신 시각으로 계산 | 보관 안 함 |
 | 식당 좌표 | 공급자 제공 좌표 | 보관(`restaurants.lat/lng`), 출처를 `coord_source`(provider, 조회 시각)로 기록 |
 | 판정 결과 | `visit_verified`, `verification_status`(verified·out_of_range·permission_denied·low_accuracy·stale·no_coordinates·unavailable) | 보관(평가 행) |
 | 판정 시각·기준 버전 | 기준 변경 시 과거 결과 해석용 | 보관(`verified_at`, `verification_rule_version`) |
@@ -145,7 +148,7 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 
 ```
 앱 입력 → (debounce 500ms, 이전 요청 취소) → place-search(query, anchor?)
-   서버: 네이버 지역 검색 호출(최대 5건, 제목 태그 제거) → type 판정(area|place) → place면 식당 upsert → 후보 [{restaurantId,name,address,category,distance?}]
+   서버: 네이버 지역 검색 호출(최대 5건, 제목 태그 제거) → type 판정(area|place) → place면 후보 [{candidateId,name,address,category,distance?}] 반환(저장하지 않음). 후보 선택 시 `select_place`가 식당 upsert 후 restaurantId 반환
 앱: place → 후보 목록 / area → "‘○○’ 주변으로 이동" 행 / 빈 결과 → 메시지 / 실패 → 다시 시도
 확정(탭 또는 키보드 검색 키): place → 평가 화면, area → 검색 기준 위치 변경 후 주변 식당
 ```
