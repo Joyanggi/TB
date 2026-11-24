@@ -16,6 +16,8 @@ orca worktree activate --environment local --worktree 'branch:orca/coordinator'
 /orchestrate 방문 인증 배지가 있는 리뷰와 없는 리뷰를 구분해 보여줘.
 ```
 
+작성 규칙이나 마스터 절차가 `main`에 병합되면, 마스터 작업을 마치고 변경 사항이 없는 상태에서 해당 워크트리 터미널의 `git pull --ff-only origin main`으로 갱신합니다. 다음 요청을 시작할 때 갱신된 작성 규칙과 마스터 절차를 읽습니다.
+
 마스터 채팅을 처음부터 만들 때만 아래 명령을 사용합니다. 첫 프롬프트는 준비 확인만 요청하므로, 응답을 받은 뒤 작업을 보냅니다.
 
 ```sh
