@@ -66,19 +66,20 @@ auth.users ─1:1─ profiles(id, display_name)
 groups(id, name, kind[group|couple], max_members, created_by)
 group_members(group_id, user_id, role[admin|member], joined_at)   PK(group_id, user_id)
 group_invites(id, group_id, token_hash, expires_at, max_uses, used_count, revoked_at)
-restaurants(id, provider[naver], provider_place_key, name, address, road_address,
+restaurants(id, provider[naver], provider_place_key, provider_place_key_version, name, address, road_address,
             lat, lng, category, coord_source, coord_updated_at)     UNIQUE(provider, provider_place_key)
 reviews(id, user_id, restaurant_id, group_id NULL,
         taste, value, mood [1..5], tags[], client_request_id,
         visit_verified, verification_status, verified_at, verification_rule_version,
         created_at, updated_at)                                     UNIQUE(user_id, client_request_id)
+place_candidates(id, user_id, payload, expires_at)               서버 전용 임시 보관(클라이언트 접근 없음)
 ```
 
 핵심 설계 결정:
 
 1. **식당의 고유 ID**: 앱 자체의 `restaurants.id`(uuid). 외부 공급자의 `(provider, provider_place_key)`를 유니크 키로 두어 같은 장소는 한 행, 이름이 같아도 주소가 다르면 다른 행(동명이점 구분). **네이버 지역 검색에는 장소 고유 ID가 없으므로** `provider_place_key`는 정규화한 (이름 + 도로명 주소)의 해시로 직접 만든다(키 규칙은 [ADR-003](../decisions/003-식당-검색과-지도-공급자.md)). 공급자를 바꾸거나 키 규칙을 보정해도 `restaurants.id`와 평가는 유지하고 `provider` 열로 매핑한다.
-2. **식당 행은 사용자가 선택할 때만, 서버만 쓴다**: 검색 Edge Function은 공급자 응답을 짧은 수명(예: 10분)의 후보 ID와 함께 반환하되 `restaurants`에 저장하지 않는다. 사용자가 후보를 선택하면 `select_place(candidate_id)`가 서버에서 공급자 응답을 upsert해 식당 ID를 반환한다. 선택하지 않은 후보는 저장되지 않으므로 약관 확인(ADR-003 G1) 전에 저장하는 범위가 최소다. 클라이언트는 후보 ID와 식당 ID만 안다 → 클라이언트가 가짜 좌표로 방문 인증을 받을 수 없다.
-3. **평가는 방문 1회 = 1행**. 재방문은 새 행(요청 ID가 다름). `group_id`가 NULL이면 개인 평가, 값이 있으면 그 그룹에 속한 평가. 한 평가는 최대 한 그룹에 속한다([ADR-004](../decisions/004-랭킹-집계와-그룹-평가-연결.md), Q1 제안).
+2. **식당 행은 사용자가 선택할 때만, 서버만 쓴다**: 검색 Edge Function은 공급자 응답을 서버 전용 테이블 `place_candidates`(사용자 ID, 공급자 원본 필드, 만료 10분)에 저장하고 후보 ID와 표시 정보를 반환한다. 이 테이블은 RLS를 켜고 정책을 두지 않아 클라이언트가 읽거나 쓸 수 없고, 만료된 행은 주기적으로 삭제한다. 사용자가 후보를 선택하면 `select_place(candidate_id)`가 **호출자와 후보의 사용자 ID 일치·만료 전 여부**를 검사한 뒤 서버에 저장된 원본으로 `restaurants`를 upsert하고, 식당 ID와 표시 정보(이름·주소·좌표·카테고리)를 반환한다. 같은 후보를 다시 선택하면 같은 식당 ID를 반환한다(멱등). 클라이언트가 보낸 이름·좌표는 쓰지 않으므로 위조할 수 없고, 선택하지 않은 후보는 `restaurants`에 저장되지 않는다. `place_candidates`는 공급자 응답을 짧게 임시 보관하므로 약관상 허용되는지 ADR-003 G1에서 확인한다 [확인 필요]. `place-search`와 `select_place`는 모두 사용자별 호출 제한을 둔다.
+3. **평가는 방문 1회 = 1행**. 재방문은 새 행(요청 ID가 다름). `group_id`가 NULL이면 개인 평가, 값이 있으면 그 그룹에 속한 평가. 한 평가는 최대 한 그룹에 속한다([ADR-004](../decisions/004-랭킹-집계와-그룹-평가-연결.md), Q1 확정).
 4. **중복 방지**: `UNIQUE(user_id, client_request_id)` + 저장 RPC가 충돌 시 기존 행을 반환(멱등).
 5. **방문 인증은 평가의 속성**: `reviews`의 열이며 별도 위치 테이블이 없다. 배지는 평가 단위이므로 그룹원에게 노출하는 쿼리에서 제외한다.
 6. **랭킹은 저장하지 않고 계산**: 뷰/RPC로 매번 집계(평가 수가 작은 첫 버전). 수정·삭제가 즉시 반영되고 불일치가 생기지 않는다. 성능 문제가 생기면 머티리얼라이즈드 뷰를 [재검토 조건](../decisions/004-랭킹-집계와-그룹-평가-연결.md)에 따라 도입.
@@ -89,11 +90,12 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 | --- | --- | --- |
 | profiles | 본인 + 같은 그룹 멤버의 표시 이름만 | 본인 |
 | groups, group_members | 그 그룹의 현재 멤버 | 직접 쓰기 없음. `create_group`, `leave_group` 등 RPC |
-| group_invites | 그룹 관리자의 목록 조회. `token_hash` 열은 어떤 클라이언트 역할도 조회할 수 없음(열 권한 회수) | RPC로만 생성·폐기(관리자) |
+| group_invites | 그룹 관리자의 목록 조회. 테이블 전체 SELECT를 부여하지 않고 `token_hash`를 뺀 열에만 SELECT 부여(어떤 클라이언트 역할도 해시를 읽을 수 없음) | 함수로만 생성(그룹 멤버)·폐기(생성자·그룹 관리자) |
 | restaurants | 사용자가 평가했거나 자기가 볼 수 있는 평가가 가리키는 식당만(그 밖의 행은 직접 조회 불가) | `select_place` 함수(서버)만 |
-| reviews | 작성자 본인은 모든 열. **다른 멤버는 `group_id`가 있고 호출자가 그 그룹의 현재 멤버이며 작성자도 현재 멤버인 행의 점수·태그·식당·작성 시각 열만**(배지·판정 사유·판정 시각·요청 ID 열은 작성자 전용 — 열 단위 권한 또는 작성자 전용 뷰로 강제) | 직접 INSERT 불가(`submit_review`). 직접 UPDATE는 점수·태그 열만 허용하고 `group_id`·배지·판정 열은 변경 불가(`update_review` 함수). DELETE는 작성자만 |
+| reviews | `authenticated`는 **공개 열**(`id`, `user_id`, `restaurant_id`, `group_id`, `taste`, `value`, `mood`, `tags`, `created_at`, `updated_at`)만 SELECT하며, 행은 (작성자 본인) 또는 (`group_id`가 있고 호출자와 작성자가 모두 그 그룹의 현재 멤버)일 때만 보인다. **작성자 전용 열**(`client_request_id`, `visit_verified`, `verification_status`, `verified_at`, `verification_rule_version`)은 base 테이블의 SELECT 권한을 회수하고 `my_reviews` 뷰(`auth.uid() = user_id` 필터)로만 읽는다 | `authenticated`에는 INSERT·UPDATE 권한이 없다(`submit_review`, `update_review` 함수만 쓴다). DELETE는 작성자 본인만 |
 
 - 멤버 판정은 `is_group_member(gid)` 보안 정의 함수(정책 재귀 방지). **모든 `SECURITY DEFINER` 함수는 `search_path`를 고정하고 `anon`·`public`의 실행 권한을 회수**하며, JWT의 `auth.uid()`와 사용자 존재를 검사한다(삭제된 계정의 만료 전 토큰 차단, F-002).
+- **열 권한은 역할 단위이고 RLS는 행 단위**라서 같은 `authenticated` 역할인 작성자와 다른 멤버를 구분하는 일은 뷰(`my_reviews`)와 함수가 한다. 작성자 전용 열을 이름으로 직접 SELECT하면 권한 오류(permission denied)다.
 - **탈퇴한 멤버의 평가**: 작성자 본인은 계속 읽을 수 있지만(내 랭킹) 그룹 정책의 읽기 조건은 작성자의 **현재** 멤버십을 요구하고, `get_ranking`의 그룹 범위는 호출자와 집계 대상 양쪽의 현재 멤버십을 모두 확인한다.
 - **내 랭킹 질의는 `user_id = auth.uid()`를 명시**해야 한다. 정책상 다른 멤버의 그룹 평가도 읽을 수 있으므로 정책만 믿고 개인 랭킹을 계산하면 남의 평가가 섞인다(테스트 항목).
 - 서비스 키는 서버(Edge Function) 환경변수에만 두고 앱에는 공개 키(anon)만 넣는다.
@@ -102,13 +104,13 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 
 | 함수 | 역할 |
 | --- | --- |
-| `place-search` (Edge Function) | 입력 분류, 공급자 호출, 후보 ID(짧은 수명)와 후보 정보 반환. JWT 검증과 사용자별 호출 제한, 식당 행은 저장하지 않음 |
-| `select_place(candidate_id)` | 선택한 후보를 서버에서 `restaurants`에 upsert하고 식당 ID 반환 |
+| `place-search` (Edge Function) | 입력 분류, 공급자 호출, 결과를 `place_candidates`에 임시 저장하고 후보 ID와 표시 정보 반환. JWT 검증과 사용자별 호출 제한, `restaurants`에는 저장하지 않음 |
+| `select_place(candidate_id)` | 후보의 사용자 ID·만료를 검사한 뒤 서버에 저장된 원본으로 `restaurants`를 upsert하고 식당 ID와 표시 정보를 반환(재선택은 멱등, 사용자별 호출 제한). 클라이언트가 보낸 이름·좌표는 사용하지 않음 |
 | `submit_review(restaurant_id, group_id, scores, tags, request_id, location?)` | 멤버십·점수 검증, 멱등 저장, 방문 인증 판정(좌표는 저장하지 않음) |
 | `update_review(review_id, scores, tags)` | 작성자 본인의 점수·태그 수정(그룹·배지·판정 열 변경 불가) |
 | `get_ranking(scope_type, group_id?)` | 범위별 순위 집계(호출자 권한으로 실행해 정책 적용) |
-| `create_group`, `create_invite`, `preview_invite`, `accept_invite`, `leave_group` | 그룹 수명주기. 초대 토큰은 128비트 무작위, 서버에는 해시만 저장. `preview_invite`는 유효한 토큰에 한해 그룹 이름만 반환. `accept_invite`는 정원·사용 횟수·멤버 추가를 한 트랜잭션으로 처리 |
-| `delete_account` (Edge Function) | 서비스 키로 인증 사용자·본인 데이터·멤버십 정리, 제공자 연결 해제(Apple 토큰 해지 등), JWT의 사용자 본인만 |
+| `create_group`, `create_invite`, `preview_invite`, `accept_invite`, `leave_group` | 그룹 수명주기. 초대 토큰은 128비트 무작위이며 서버에는 해시만 저장. `preview_invite`는 유효한 토큰에 한해 그룹 이름만 반환하고 `accept_invite`는 정원·사용 횟수·멤버 추가를 한 트랜잭션으로 처리. 두 함수 모두 사용자별 호출 제한을 두고 존재하지 않는 값은 모두 같은 "사용할 수 없는 초대"로 응답 |
+| `delete_account` (Edge Function) | 요청 본문의 사용자 ID는 받지 않고 **서버가 JWT를 검증(`auth.getUser`)해 확인한 본인만** 삭제하며 최근 재인증(로그인 후 N분 이내)을 요구한다 [제안]. 순서: ①제공자 연결 해제(Apple 토큰 해지 등) → ②앱 데이터·멤버십 정리(마지막 멤버면 그룹 삭제, 유일한 관리자면 가장 오래된 멤버가 관리자 승계) → ③Auth 사용자 삭제. 각 단계는 멱등이라 중간에 실패해도 같은 요청을 재시도하면 이어서 끝나고 응답을 잃어도 성공으로 끝난다. 삭제 뒤 만료 전 JWT는 함수가 사용자 존재를 검사해 거부한다 |
 
 ## 로그인과 계정
 
@@ -129,7 +131,7 @@ reviews(id, user_id, restaurant_id, group_id NULL,
 
 [PRD 방문 인증](../product/PRD.md#c-방문-인증-확정) 요구를 아래 방식으로 구현한다([ADR-005](../decisions/005-방문-인증-처리와-위치-정보-최소화.md)).
 
-흐름: 평가 저장 탭 → (첫 1회 안내) → OS 권한 "앱 사용 중 허용" → 현재 위치 1회 측정(타임아웃 10초) → `submit_review`에 `{lat, lng, accuracy, measured_at}`을 **일회성 인자**로 전달 → 서버가 거리 계산·판정 → 결과만 저장.
+흐름: 평가 저장 탭 → (첫 1회 안내) → OS 권한 "앱 사용 중 허용" → 현재 위치 1회 측정(타임아웃 10초) → `submit_review`에 `{lat, lng, accuracy, age_ms}`(`age_ms`는 측정 후 경과 시간)를 **일회성 인자**로 전달 → 서버가 거리 계산·판정 → 결과만 저장.
 
 | 정보 | 처리 | 보관 |
 | --- | --- | --- |

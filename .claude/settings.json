@@ -55,7 +55,31 @@
       "Read(**/*.p8)",
       "Read(**/*.p12)",
       "Read(~/.aws/**)",
-      "Read(~/.npmrc)"
+      "Read(~/.npmrc)",
+      "Bash(git * --no-index*)",
+      "Bash(git * --output*)",
+      "Bash(git * --ext-diff*)",
+      "Bash(git * --textconv*)",
+      "Bash(git commit -n *)",
+      "Bash(git commit * -n *)",
+      "Bash(git commit * -n)",
+      "Bash(git commit --amen*)",
+      "Bash(git commit * --amen*)",
+      "Bash(git commit --no-verif*)",
+      "Bash(git commit * --no-verif*)",
+      "Read(**/*.pem)",
+      "Read(~/.netrc)",
+      "Read(~/.config/gh/**)",
+      "Read(//Users/joyanggi/.ssh/**)",
+      "Read(//Users/joyanggi/.aws/**)",
+      "Read(//Users/joyanggi/.npmrc)",
+      "Read(//Users/joyanggi/.codex/auth.json)"
+    ],
+    "ask": [
+      "Edit(.claude/**)",
+      "Write(.claude/**)",
+      "Edit(REVIEW.md)",
+      "Write(REVIEW.md)"
     ]
   },
   "effortLevel": "high"
