@@ -2,6 +2,12 @@
 
 변경에 해당하는 항목을 골라 사용하고, 결과를 PR 검증란에 기록합니다. iPhone 연결이 필요한 경우 테스트 직전에 알립니다. 기록 형식: `기기·iOS·빌드 / 항목 / 결과 / 미확인`.
 
+## 실기기 사전 확인
+
+- 개발 빌드와 테스트 계정·데이터, 확인할 흐름을 준비합니다. 연결이 필요하면 Mac에 USB로 연결하고 테스트할 동안 화면을 잠금 해제해 달라고 요청합니다. 최초 페어링·[개발자 모드](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)나 서명 승인이 필요한 경우에만 해당 조작을 추가로 요청합니다.
+- `xcrun devicectl list devices`로 연결 상태를 확인하고, 연결됐을 때 `xcrun devicectl device info lockState --device <로컬 기기 식별자>`로 잠금 상태를 확인할 수 있습니다. 페어링 기록, 실제 연결, 잠금 해제를 각각 확인합니다. 기기 식별자는 저장소나 PR에 올리지 않습니다.
+- Mobile MCP 사용 시 기기 목록에서 iPhone을 찾고, TB를 실행해 첫 화면 요소 조회와 실제 입력 반응을 한 번 확인합니다. 기기 검색 성공만으로 화면 자동화가 준비됐다고 판정하지 않습니다. 화면이 잠기면 테스트를 멈추고 잠금 해제 후 TB 화면에서 이어갑니다. Mobile MCP 연결·화면 제어가 막히면 Xcode로 설치하고 수동으로 검증할 수 있습니다. [Mobile MCP 기기 지원](https://github.com/mobile-next/mobile-mcp#supported-devices)
+
 ## 공통
 
 - [ ] 앱을 설치하고 첫 화면까지 진입했다. (개발 빌드)
