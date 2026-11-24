@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from orca_merge import Blocked, protected_paths, verify_pr, verify_review
+from orca_merge import Blocked, protected_paths, verify_branch_rules, verify_pr, verify_review
 
 
 class MergeGateTests(unittest.TestCase):
@@ -24,6 +24,7 @@ class MergeGateTests(unittest.TestCase):
             ("claude", f"TB-REVIEW {'2' * 40} PASS"),
             ("claude", f"TB-REVIEW {self.sha} BLOCK"),
             ("claude", report["body"] + "\n" + report["body"]),
+            ("claude", report["body"] + "\nReview is inconclusive."),
         ]:
             with self.subTest(role=role, body=body), self.assertRaises(Blocked):
                 tasks["task_1"]["result"] = json.dumps({**report, "body": body})
@@ -36,6 +37,18 @@ class MergeGateTests(unittest.TestCase):
         for changes in ({"headRefOid": "2" * 40}, {"isCrossRepository": True}, {"baseRefName": "else"}):
             with self.subTest(changes=changes), self.assertRaises(Blocked):
                 verify_pr({**pr, **changes}, self.sha)
+
+    def test_branch_rules_require_the_github_actions_publisher(self):
+        checks = [dict(context="TB CI", integration_id=15368),
+                  dict(context="tb/review-claude"), dict(context="tb/review-codex")]
+        rules = [dict(type=kind) for kind in ("pull_request", "deletion", "non_fast_forward")]
+        rules.append(dict(type="required_status_checks", parameters=dict(
+            strict_required_status_checks_policy=True, required_status_checks=checks,
+        )))
+        verify_branch_rules(rules)
+        del checks[0]["integration_id"]
+        with self.assertRaises(Blocked):
+            verify_branch_rules(rules)
 
     def test_policy_files_are_gated_even_when_renamed(self):
         pages = [[{"filename": "README.md"}, {"filename": "example.yml",

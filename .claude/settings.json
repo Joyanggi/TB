@@ -45,7 +45,7 @@
       "Bash(gh pr create --repo Joyanggi/TB --base main --head orca/*)",
       "Bash(gh pr view *)",
       "Bash(gh pr checks *)",
-      "Bash(python3 scripts/orca_merge.py *)"
+      "Bash(tb-orca-merge *)"
     ],
     "deny": [
       "Read(./.env)",

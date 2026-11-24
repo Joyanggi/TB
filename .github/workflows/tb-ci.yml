@@ -29,7 +29,11 @@ jobs:
         run: |
           git diff --check "$BASE_SHA" HEAD
           python3 -m json.tool .claude/settings.json >/dev/null
-          python3 -m unittest discover -s scripts -p 'test_*.py'
+          if git cat-file -e "$BASE_SHA:package.json" && [ ! -f package.json ]; then
+            echo 'The app manifest was removed; refusing to skip app checks.'
+            exit 1
+          fi
+          python3 -B -m unittest discover -s scripts -p 'test_*.py'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         if: ${{ hashFiles('package.json') != '' }}
         with:

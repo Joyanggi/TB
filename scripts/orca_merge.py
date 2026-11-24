@@ -1,3 +1,4 @@
+#!/usr/bin/python3 -I
 """Publish two Orca verdicts for a PR head and request GitHub auto-merge."""
 
 import argparse
@@ -10,11 +11,14 @@ from pathlib import PurePosixPath
 REPO = "Joyanggi/TB"
 BASE = "main"
 CI = "TB CI"
+GITHUB_ACTIONS_APP_ID = 15368
 REVIEWERS = ("claude", "codex")
 CONTEXTS = {role: f"tb/review-{role}" for role in REVIEWERS}
 PROTECTED = (
     ".claude", ".github", "AGENTS.md", "CLAUDE.md", "REVIEW.md",
-    "docs/development/WORKFLOW.md", "scripts/orca_merge.py",
+    "docs/development/WORKFLOW.md", "docs/development/PR-ISSUE-GUIDE.md",
+    "docs/quality", "docs/product/PRD.md", "docs/product/REQUIREMENTS.md",
+    "docs/decisions", "supabase/migrations", "scripts/orca_merge.py",
     "scripts/test_orca_merge.py",
 )
 
@@ -60,11 +64,10 @@ def verify_review(run_id, sha, role, dispatch_id, worker, tasks):
         or f"TB-REVIEW-TARGET {sha}" not in (task.get("spec") or "").splitlines()
     ):
         raise Blocked(f"{role} did not return an attributable read-only report for this SHA.")
-    decisions = [
-        line.strip() for line in (report.get("body") or "").splitlines()
-        if line.strip().startswith("TB-REVIEW ")
-    ]
-    if decisions != [f"TB-REVIEW {sha} PASS"]:
+    lines = [line.strip() for line in (report.get("body") or "").splitlines() if line.strip()]
+    decision = f"TB-REVIEW {sha} PASS"
+    markers = [line for line in lines if line.startswith("TB-REVIEW ")]
+    if not lines or lines[-1] != decision or markers != [decision]:
         raise Blocked(f"{role} did not pass the requested commit.")
     return task["id"]
 
@@ -83,7 +86,7 @@ def protected_paths(pages):
 
 def verify_pr(pr, sha):
     if (
-        pr.get("state") != "OPEN" or pr.get("isCrossRepository")
+        pr.get("state") != "OPEN" or pr.get("isCrossRepository") is not False
         or pr.get("baseRefName") != BASE or not pr.get("headRefName", "").startswith("orca/")
         or pr.get("headRefOid") != sha
     ):
@@ -93,11 +96,12 @@ def verify_pr(pr, sha):
 def verify_branch_rules(rules):
     by_type = {rule["type"]: rule for rule in rules}
     status = (by_type.get("required_status_checks") or {}).get("parameters") or {}
-    contexts = {check.get("context") for check in status.get("required_status_checks", [])}
+    contexts = {check.get("context"): check for check in status.get("required_status_checks", [])}
     if (
         "pull_request" not in by_type or "non_fast_forward" not in by_type
         or "deletion" not in by_type or not status.get("strict_required_status_checks_policy")
-        or not ({CI} | set(CONTEXTS.values())).issubset(contexts)
+        or not set(CONTEXTS.values()).issubset(contexts)
+        or contexts.get(CI, {}).get("integration_id") != GITHUB_ACTIONS_APP_ID
     ):
         raise Blocked("main is missing the PR-only or required-check protection.")
 
@@ -140,6 +144,8 @@ def main():
         if args.verify_only:
             print(json.dumps({"sha": args.sha, "reviews": task_ids, "pr": pr["url"]}))
             return
+        if github("user").get("login", "").casefold() != REPO.split("/", 1)[0].casefold():
+            raise Blocked("Only the configured coordinator GitHub account may publish the checks.")
         paths = protected_paths(github(
             f"repos/{REPO}/pulls/{args.pr}/files?per_page=100", "--paginate", "--slurp"
         ))
