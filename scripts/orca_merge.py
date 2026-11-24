@@ -2,15 +2,12 @@
 """Publish two Orca verdicts for a PR head and request GitHub auto-merge."""
 
 import argparse
-import fcntl
 import json
-import os
-import pwd
 import re
 import subprocess
 import unicodedata
-from contextlib import contextmanager
-from pathlib import Path, PurePosixPath
+from contextlib import contextmanager, nullcontext
+from pathlib import PurePosixPath
 
 
 REPO = "Joyanggi/TB"
@@ -20,6 +17,7 @@ CI = "TB CI"
 GITHUB_ACTIONS_APP_ID = 15368
 REVIEWERS = ("claude", "codex")
 CONTEXTS = {role: f"tb/review-{role}" for role in REVIEWERS}
+RECHECK_CONTEXT = "tb/recheck-registered"
 PROTECTED = (
     ".claude", ".github", "AGENTS.md", "CLAUDE.md", "REVIEW.md",
     "docs/development/WORKFLOW.md", "docs/development/PR-ISSUE-GUIDE.md",
@@ -93,13 +91,14 @@ def verify_review_pair(sha, task_ids, tasks, *, must_recheck=False):
 
 
 @contextmanager
-def review_lock(pr_number, sha):
-    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
-    directory = home / "Library" / "Application Support" / "tb-orca-merge" / "locks"
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with (directory / f"{pr_number}-{sha}").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+def review_lock(sha):
+    ref = f"heads/tb-review-lock/{sha}"
+    # GitHub's create-only operation lets one coordinator acquire the ref.
+    github("-X", "POST", f"repos/{REPO}/git/refs", "-f", f"ref=refs/{ref}", "-f", f"sha={sha}")
+    try:
         yield
+    finally:
+        run("gh", "api", "-X", "DELETE", f"repos/{REPO}/git/refs/{ref}")
 
 
 def require_coordinator():
@@ -107,28 +106,28 @@ def require_coordinator():
         raise Blocked("Only the configured coordinator GitHub account may publish the checks.")
 
 
-def recheck_context(pr_number):
-    return f"tb/recheck-registered/pr-{pr_number}"
-
-
-def registered_recheck(pr_number, sha):
-    context = recheck_context(pr_number)
+def review_statuses(sha):
     pages = github(f"repos/{REPO}/commits/{sha}/statuses?per_page=100", "--paginate", "--slurp")
-    runs = set()
-    for page in pages:
-        for entry in page:
-            if entry["context"].casefold() != context:
-                continue
-            match = re.fullmatch(r"Orca run (run_[a-z0-9]+)", entry.get("description") or "")
-            if (
-                not match or entry["state"] != "success"
-                or (entry.get("creator") or {}).get("login", "").casefold() != REPO_OWNER
-            ):
-                raise Blocked("The disagreement recheck registration could not be verified.")
-            runs.add(match[1])
-    if len(runs) > 1:
-        raise Blocked("Conflicting disagreement recheck registrations for this PR head.")
-    return next(iter(runs), None)
+    return [entry for page in pages for entry in page]
+
+
+def registered_recheck(statuses):
+    registrations = set()
+    for entry in statuses:
+        if entry["context"].casefold() != RECHECK_CONTEXT:
+            continue
+        match = re.fullmatch(r"Orca run (run_[a-z0-9]+)", entry.get("description") or "")
+        url = entry.get("target_url") or ""
+        if (
+            not match or not re.fullmatch(rf"https://github\.com/{REPO}/pull/[1-9][0-9]*", url)
+            or entry["state"] != "success"
+            or (entry.get("creator") or {}).get("login", "").casefold() != REPO_OWNER
+        ):
+            raise Blocked("The disagreement recheck registration could not be verified.")
+        registrations.add((url, match[1]))
+    if len(registrations) > 1:
+        raise Blocked("Conflicting disagreement recheck registrations for this commit.")
+    return next(iter(registrations), None)
 
 
 def protected_paths(pages, expected_count):
@@ -201,18 +200,35 @@ def process_pr(args):
     pr = get_pr()
     verify_pr(pr, args.sha)
     verify_branch_rules(github(f"repos/{REPO}/rules/branches/{BASE}"))
-    registered_run = registered_recheck(args.pr, args.sha)
-    if registered_run and registered_run != args.run:
-        raise Blocked("This PR head must use the Orca run registered for disagreement recheck.")
+    if not args.verify_only:
+        require_coordinator()
+        if not args.require_recheck:
+            pages = github(f"repos/{REPO}/pulls/{args.pr}/files?per_page=100", "--paginate", "--slurp")
+            paths = protected_paths(pages, pr.get("changedFiles"))
+            if paths:
+                raise Blocked("Automation policy changes require owner review: " + ", ".join(sorted(paths)))
+    with nullcontext() if args.verify_only else review_lock(args.sha):
+        assess_pr(args, get_pr)
+
+
+def assess_pr(args, get_pr):
+    pr = get_pr()
+    verify_pr(pr, args.sha)
+    statuses = review_statuses(args.sha)
+    registration = registered_recheck(statuses)
+    if registration and registration != (pr["url"], args.run):
+        raise Blocked("This commit must use the PR and Orca run registered for disagreement recheck.")
     if args.require_recheck:
         if pr.get("isDraft") is not True:
             raise Blocked("Register a disagreement recheck while the PR is in draft.")
-        if not registered_run:
-            require_coordinator()
+        if not registration:
+            if any(item["context"].casefold() in CONTEXTS.values() and item["state"] == "success"
+                   for item in statuses):
+                raise Blocked("Review approvals already exist for this commit. Review a new commit.")
             orca("run-show", "--id", args.run)
             github(
                 "-X", "POST", f"repos/{REPO}/statuses/{args.sha}",
-                "-f", "state=success", "-f", f"context={recheck_context(args.pr)}",
+                "-f", "state=success", "-f", f"context={RECHECK_CONTEXT}",
                 "-f", f"description=Orca run {args.run}", "-f", f"target_url={pr['url']}",
             )
         print(json.dumps({"sha": args.sha, "recheckRun": args.run, "pr": pr["url"]}))
@@ -223,18 +239,13 @@ def process_pr(args):
                             orca("worker-show", "--dispatch", getattr(args, role)), tasks)
         for role in REVIEWERS
     }
-    verify_review_pair(args.sha, task_ids, tasks, must_recheck=bool(registered_run))
+    verify_review_pair(args.sha, task_ids, tasks, must_recheck=bool(registration))
     if args.verify_only:
         print(json.dumps({"sha": args.sha, "reviews": task_ids, "pr": pr["url"]}))
         return
-    require_coordinator()
-    pages = github(f"repos/{REPO}/pulls/{args.pr}/files?per_page=100", "--paginate", "--slurp")
-    paths = protected_paths(pages, pr.get("changedFiles"))
-    if paths:
-        raise Blocked("Automation policy changes require owner review: " + ", ".join(sorted(paths)))
     pr = get_pr()
     verify_pr(pr, args.sha)
-    if registered_recheck(args.pr, args.sha) != registered_run:
+    if registered_recheck(review_statuses(args.sha)) != registration:
         raise Blocked("The disagreement recheck registration changed. Verify the latest reports.")
     for role, task_id in task_ids.items():
         github(
@@ -272,8 +283,7 @@ def main():
         parser.error("Expected two distinct review dispatch IDs.")
 
     try:
-        with review_lock(args.pr, args.sha):
-            process_pr(args)
+        process_pr(args)
     except (Blocked, OSError, subprocess.CalledProcessError, ValueError, KeyError) as exc:
         parser.exit(1, f"Auto-merge blocked: {exc}\n")
 

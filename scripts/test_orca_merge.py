@@ -3,12 +3,13 @@ import json
 import subprocess
 import unittest
 from argparse import Namespace
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from unittest.mock import Mock, patch
 
 from orca_merge import (
-    Blocked, merge_or_queue, process_pr, protected_paths, recheck_context, registered_recheck,
-    verify_branch_rules, verify_pr, verify_review, verify_review_pair,
+    Blocked, RECHECK_CONTEXT, assess_pr, merge_or_queue, process_pr, protected_paths,
+    registered_recheck, review_lock, review_statuses, verify_branch_rules, verify_pr, verify_review,
+    verify_review_pair,
 )
 
 
@@ -81,45 +82,81 @@ class MergeGateTests(unittest.TestCase):
 
     @patch("orca_merge.orca")
     @patch("orca_merge.verify_branch_rules")
-    @patch("orca_merge.registered_recheck", side_effect=[None, "run_recheck", "run_recheck"])
+    @patch("orca_merge.review_lock", return_value=nullcontext())
+    @patch("orca_merge.review_statuses", return_value=[])
+    @patch("orca_merge.registered_recheck")
     @patch("orca_merge.github")
     @patch("orca_merge.run")
     def test_registration_is_published_once_and_blocks_another_run(
-        self, run, github, registration, verify_branch_rules, orca,
+        self, run, github, registration, statuses, lock, verify_branch_rules, orca,
     ):
+        url = "https://github.com/Joyanggi/TB/pull/6"
         pr = dict(state="OPEN", isCrossRepository=False, baseRefName="main",
-                  headRefName="orca/example", headRefOid=self.sha, isDraft=True, url="https://example.invalid")
+                  headRefName="orca/example", headRefOid=self.sha, isDraft=True, url=url)
         run.return_value = json.dumps(pr)
         github.return_value = {"login": "Joyanggi"}
-        args = Namespace(pr=6, sha=self.sha, run="run_recheck", require_recheck=True)
+        registration.side_effect = [None, (url, "run_recheck"), (url, "run_recheck"), (url, "run_recheck")]
+        args = Namespace(pr=6, sha=self.sha, run="run_recheck", require_recheck=True, verify_only=False)
         with redirect_stdout(io.StringIO()):
             process_pr(args)
             process_pr(args)
             orca.assert_called_once_with("run-show", "--id", "run_recheck")
             posts = [call.args for call in github.call_args_list if call.args[:1] == ("-X",)]
             self.assertEqual(len(posts), 1)
-            self.assertIn(f"context={recheck_context(args.pr)}", posts[0])
+            self.assertIn(f"context={RECHECK_CONTEXT}", posts[0])
 
-            old_run = Namespace(pr=args.pr, sha=self.sha, run="run_initial", require_recheck=False)
-            with self.assertRaisesRegex(Blocked, "run registered"):
-                process_pr(old_run)
+            verify = Namespace(pr=args.pr, sha=self.sha, run="run_initial", require_recheck=False,
+                               verify_only=True)
+            with self.assertRaisesRegex(Blocked, "PR and Orca run registered"):
+                process_pr(verify)
+            verify.run = args.run
+            verify.pr = 7
+            run.return_value = json.dumps({**pr, "url": "https://github.com/Joyanggi/TB/pull/7"})
+            with self.assertRaisesRegex(Blocked, "PR and Orca run registered"):
+                process_pr(verify)
             orca.assert_called_once()
+            self.assertEqual(lock.call_count, 2)
 
     @patch("orca_merge.github")
     def test_registration_uses_paginated_github_history_and_checks_the_publisher(self, github):
-        entry = dict(context=recheck_context(6), description="Orca run run_recheck",
-                     state="success", creator={"login": "Joyanggi"})
-        github.return_value = [[{**entry, "context": recheck_context(7)}], [entry]]
-        self.assertEqual(registered_recheck(6, self.sha), "run_recheck")
+        url = "https://github.com/Joyanggi/TB/pull/6"
+        entry = dict(context=RECHECK_CONTEXT, description="Orca run run_recheck",
+                     target_url=url, state="success", creator={"login": "Joyanggi"})
+        github.return_value = [[{**entry, "context": "other/check"}], [entry]]
+        self.assertEqual(registered_recheck(review_statuses(self.sha)), (url, "run_recheck"))
         github.assert_called_once_with(
             f"repos/Joyanggi/TB/commits/{self.sha}/statuses?per_page=100", "--paginate", "--slurp",
         )
-        self.assertIsNone(registered_recheck(8, self.sha))
+        self.assertIsNone(registered_recheck([]))
         for bad in ({"creator": {"login": "other"}}, {"description": "Orca run run_other"},
+                    {"target_url": "https://github.com/Joyanggi/TB/pull/7"},
                     {"state": "failure"}):
-            github.return_value = [[entry], [{**entry, **bad}]]
             with self.subTest(bad=bad), self.assertRaises(Blocked):
-                registered_recheck(6, self.sha)
+                registered_recheck([entry, {**entry, **bad}])
+
+    @patch("orca_merge.review_statuses", return_value=[{"context": "tb/review-claude", "state": "success"}])
+    def test_recheck_cannot_start_after_approval_was_published(self, statuses):
+        args = Namespace(pr=6, sha=self.sha, run="run_recheck", require_recheck=True)
+        pr = dict(state="OPEN", isCrossRepository=False, baseRefName="main", headRefName="orca/example",
+                  headRefOid=self.sha, isDraft=True, url="https://github.com/Joyanggi/TB/pull/6")
+        with self.assertRaisesRegex(Blocked, "approvals already exist"):
+            assess_pr(args, lambda: pr)
+
+    @patch("orca_merge.run")
+    @patch("orca_merge.github")
+    def test_remote_lock_releases_only_after_successful_acquisition(self, github, run):
+        ref = f"heads/tb-review-lock/{self.sha}"
+        with self.assertRaisesRegex(Blocked, "review failed"), review_lock(self.sha):
+            raise Blocked("review failed")
+        github.assert_called_once_with(
+            "-X", "POST", "repos/Joyanggi/TB/git/refs", "-f", f"ref=refs/{ref}", "-f", f"sha={self.sha}",
+        )
+        run.assert_called_once_with("gh", "api", "-X", "DELETE", f"repos/Joyanggi/TB/git/refs/{ref}")
+        run.reset_mock()
+        github.side_effect = subprocess.CalledProcessError(1, "gh")
+        with self.assertRaises(subprocess.CalledProcessError), review_lock(self.sha):
+            self.fail("A competing coordinator already owns the lock.")
+        run.assert_not_called()
 
     def test_branch_rules_require_the_github_actions_publisher(self):
         checks = [dict(context="TB CI", integration_id=15368),
