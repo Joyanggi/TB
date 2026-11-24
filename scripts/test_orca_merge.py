@@ -1,7 +1,9 @@
 import json
+import subprocess
 import unittest
+from unittest.mock import Mock, patch
 
-from orca_merge import Blocked, protected_paths, verify_branch_rules, verify_pr, verify_review
+from orca_merge import Blocked, merge_or_queue, protected_paths, verify_branch_rules, verify_pr, verify_review
 
 
 class MergeGateTests(unittest.TestCase):
@@ -51,6 +53,35 @@ class MergeGateTests(unittest.TestCase):
         del checks[0]["integration_id"]
         with self.assertRaises(Blocked):
             verify_branch_rules(rules)
+
+    @patch("orca_merge.run", return_value="done")
+    def test_clean_pr_merges_without_auto_flag(self, run):
+        pr = dict(state="OPEN", isCrossRepository=False, baseRefName="main",
+                  headRefName="orca/example", headRefOid=self.sha, mergeStateStatus="CLEAN")
+        self.assertEqual(merge_or_queue(3, self.sha, lambda: pr), "done")
+        run.assert_called_once_with("gh", "pr", "merge", "3", "--repo", "Joyanggi/TB",
+                                    "--squash", "--match-head-commit", self.sha)
+
+    @patch("orca_merge.run")
+    def test_merges_if_checks_finish_during_auto_request(self, run):
+        pr = dict(state="OPEN", isCrossRepository=False, baseRefName="main",
+                  headRefName="orca/example", headRefOid=self.sha, mergeStateStatus="BLOCKED")
+        get_pr = Mock(side_effect=[pr, {**pr, "mergeStateStatus": "CLEAN"}])
+        run.side_effect = [subprocess.CalledProcessError(1, "gh"), "done"]
+        self.assertEqual(merge_or_queue(3, self.sha, get_pr), "done")
+        first, second = [call.args for call in run.call_args_list]
+        self.assertEqual(first, (*second, "--auto"))
+        self.assertEqual(second[-2:], ("--match-head-commit", self.sha))
+
+    @patch("orca_merge.run")
+    def test_race_does_not_merge_another_commit(self, run):
+        pr = dict(state="OPEN", isCrossRepository=False, baseRefName="main",
+                  headRefName="orca/example", headRefOid=self.sha, mergeStateStatus="BLOCKED")
+        get_pr = Mock(side_effect=[pr, {**pr, "mergeStateStatus": "CLEAN", "headRefOid": "2" * 40}])
+        run.side_effect = subprocess.CalledProcessError(1, "gh")
+        with self.assertRaises(Blocked):
+            merge_or_queue(3, self.sha, get_pr)
+        run.assert_called_once()
 
     def test_policy_files_are_gated_even_when_renamed(self):
         pages = [[{"filename": "README.md"}, {"filename": "example.yml",
