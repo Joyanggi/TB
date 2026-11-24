@@ -1,6 +1,6 @@
-# Mobile App Starter
+# 트바 (TrustBite)
 
-앱 아이디어를 정한 뒤 Claude Code와 Codex로 기획, 구현, 검증을 시작하기 위한 비공개 저장소입니다. `mobile-app-starter`는 GitHub 저장소의 임시 이름입니다.
+트바(TrustBite) 앱의 기획·설계 문서와 개발 규칙을 담은 공개 GitHub 저장소(`Joyanggi/TB`)입니다. Claude Code와 Codex로 기획, 구현, 검증을 진행합니다.
 
 ## 시작하기
 
