@@ -17,7 +17,7 @@
 | [PRD](docs/product/PRD.md) · [요구사항](docs/product/REQUIREMENTS.md) | 어떤 문제를 풀고 무엇을 만들어야 하는지 |
 | [아키텍처](docs/architecture/ARCHITECTURE.md) · [기술 결정 기록](docs/decisions/README.md) | 앱 구조와 주요 선택의 이유 |
 | [테스트 전략](docs/quality/TEST-STRATEGY.md) · [위험 목록](docs/quality/RISK-REGISTER.md) · [실기기 체크리스트](docs/quality/RELIABILITY-CHECKLIST.md) | 무엇을 검증하고 어떤 증거를 남길지 |
-| [개발 흐름](docs/development/WORKFLOW.md) · [리뷰 기준](REVIEW.md) | Orca, Git worktree, PR 검토 |
+| [개발 흐름](docs/development/WORKFLOW.md) · [리뷰 기준](REVIEW.md) · [Issue·PR 작성 규칙](docs/development/PR-ISSUE-GUIDE.md) | Orca, Git worktree, PR 검토, 사람이 읽는 Issue·PR 양식 |
 | [AGENTS.md](AGENTS.md) · [CLAUDE.md](CLAUDE.md) | Claude Code와 Codex가 공유하는 저장소 규칙 |
 
 ## 현재 상태
