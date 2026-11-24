@@ -1,0 +1,47 @@
+name: TrustBite
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tb-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: TB CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check diff and merge policy
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git diff --check "$BASE_SHA" HEAD
+          python3 -m json.tool .claude/settings.json >/dev/null
+          if git cat-file -e "$BASE_SHA:package.json" && [ ! -f package.json ]; then
+            echo 'The app manifest was removed; refusing to skip app checks.'
+            exit 1
+          fi
+          python3 -B -m unittest discover -s scripts -p 'test_*.py'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: ${{ hashFiles('package.json') != '' }}
+        with:
+          node-version: '24'
+      - name: Check app
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test -- --ci
