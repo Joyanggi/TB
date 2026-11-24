@@ -3,7 +3,7 @@ import json
 import subprocess
 import unittest
 from argparse import Namespace
-from contextlib import nullcontext, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from unittest.mock import Mock, patch
 
 from orca_merge import (
@@ -67,18 +67,21 @@ class MergeGateTests(unittest.TestCase):
         tasks = {"task_1": {}, "task_2": {}, "task_3": marked}
 
         with self.assertRaises(Blocked):
-            verify_review_pair(self.sha, initial, tasks)
+            verify_review_pair(self.sha, initial, tasks, must_recheck=True)
 
         tasks["task_4"] = marked
         for stale in (initial, {"claude": "task_1", "codex": "task_4"}):
             with self.subTest(pair=stale), self.assertRaises(Blocked):
-                verify_review_pair(self.sha, stale, tasks)
-        verify_review_pair(self.sha, recheck, tasks)
+                verify_review_pair(self.sha, stale, tasks, must_recheck=True)
+        verify_review_pair(self.sha, recheck, tasks, must_recheck=True)
+        for pair in (initial, recheck):
+            with self.subTest(pair=pair), self.assertRaisesRegex(Blocked, "Register"):
+                verify_review_pair(self.sha, pair, tasks)
 
         # Retries use the same task. An unexpected third recheck task cannot be ignored.
         tasks["task_extra"] = marked
         with self.assertRaises(Blocked):
-            verify_review_pair(self.sha, recheck, tasks)
+            verify_review_pair(self.sha, recheck, tasks, must_recheck=True)
 
     @patch("orca_merge.orca")
     @patch("orca_merge.verify_branch_rules")
@@ -157,6 +160,13 @@ class MergeGateTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError), review_lock(self.sha):
             self.fail("A competing coordinator already owns the lock.")
         run.assert_not_called()
+
+    @patch("orca_merge.run", side_effect=subprocess.CalledProcessError(1, "gh"))
+    @patch("orca_merge.github")
+    def test_lock_cleanup_failure_preserves_the_merge_result(self, github, run):
+        with redirect_stderr(io.StringIO()) as message, review_lock(self.sha):
+            pass
+        self.assertIn(f"Could not release heads/tb-review-lock/{self.sha}", message.getvalue())
 
     def test_branch_rules_require_the_github_actions_publisher(self):
         checks = [dict(context="TB CI", integration_id=15368),

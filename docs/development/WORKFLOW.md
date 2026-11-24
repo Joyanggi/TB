@@ -51,6 +51,8 @@ orca agent launch --environment local --worktree 'branch:orca/coordinator' \
 
 이견 재검토를 등록하면 실행기가 해당 SHA에 `tb/recheck-registered` 상태로 PR 링크와 Orca Run ID를 기록합니다. GitHub의 필수 상태는 SHA에 붙으므로, 같은 SHA로 다른 PR을 열어도 등록을 적용합니다. 등록과 병합 요청은 GitHub의 임시 `tb-review-lock/<SHA>` 브랜치로 동시에 한 실행기만 처리하며 실행 뒤 잠금을 해제합니다. 두 필수 리뷰 판정은 별도로 게시합니다. 맥을 바꿔 재개할 때도 GitHub에서 등록한 Run을 확인합니다. 그 Run의 기록을 복원할 수 없거나 기존 SHA의 승인 게시 뒤에 새 이견이 생기면 새 검토 대상 커밋으로 리뷰를 다시 시작합니다.
 
+중단이나 통신 오류로 잠금이 남으면 먼저 GitHub에서 PR이 병합됐거나 자동 병합 대기 중인지 확인합니다. 같은 SHA를 처리하던 모든 실행기가 종료됐고 잠금 브랜치가 그 SHA를 가리키는 것을 확인한 뒤, 저장소 소유자가 해당 `tb-review-lock/<SHA>` 브랜치만 삭제합니다. 열린 Draft 작업은 기존 GitHub 등록과 Orca Run에서 검토를 이어갑니다.
+
 GitHub Actions가 이름이 `TB CI`인 검사를 게시합니다. Claude·Codex 판정은 마스터의 GitHub 계정으로 별개의 커밋 상태에 게시하며, Orca 작업자 두 명의 완료 기록과 최종 SHA를 대조합니다. 리뷰 공급자 두 곳이 GitHub에 각각 로그인하는 방식은 사용하지 않습니다.
 
 ## Codex 작업자 설정 (저장소 밖, 1회)

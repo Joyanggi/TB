@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import unicodedata
 from contextlib import contextmanager, nullcontext
 from pathlib import PurePosixPath
@@ -85,8 +86,10 @@ def verify_review_pair(sha, task_ids, tasks, *, must_recheck=False):
         task_id for task_id, task in tasks.items()
         if marker in map(str.strip, (task.get("spec") or "").splitlines())
     }
-    # A recorded recheck supersedes the first pair even before either recheck finishes.
-    if (must_recheck or rechecks) and selected != rechecks:
+    if rechecks and not must_recheck:
+        raise Blocked("Register the disagreement recheck in GitHub before using its verdicts.")
+    # Registration supersedes the first pair even before either recheck finishes.
+    if must_recheck and selected != rechecks:
         raise Blocked("Both PASS reports must come from the disagreement recheck for this SHA.")
 
 
@@ -98,7 +101,11 @@ def review_lock(sha):
     try:
         yield
     finally:
-        run("gh", "api", "-X", "DELETE", f"repos/{REPO}/git/refs/{ref}")
+        try:
+            run("gh", "api", "-X", "DELETE", f"repos/{REPO}/git/refs/{ref}")
+        except (OSError, subprocess.CalledProcessError):
+            print(f"Could not release {ref}. Check the PR and active coordinators before retrying.",
+                  file=sys.stderr)
 
 
 def require_coordinator():
