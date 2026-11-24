@@ -49,7 +49,7 @@ orca agent launch --environment local --worktree 'branch:orca/coordinator' \
 
 마스터는 절대 경로에 설치된 `/opt/homebrew/bin/tb-orca-merge`만 호출합니다. 설치와 갱신은 검토를 마치고 보호된 `origin/main`에 병합된 버전의 `scripts/orca_merge.py`로 진행합니다. 작업 브랜치의 스크립트를 GitHub 쓰기 권한으로 실행하지 않습니다. Mac을 바꾸거나 그 파일을 변경한 운영 PR을 병합했으면 새 버전을 다시 설치합니다.
 
-이견 재검토를 등록하면 실행기가 이 Mac의 `~/Library/Application Support/tb-orca-merge/rechecks/`에 PR 번호, 커밋 SHA, Orca Run의 연결을 기록합니다. 작업을 재개할 때 해당 Run의 두 재검토 Task를 이어서 사용합니다.
+이견 재검토를 등록하면 실행기가 해당 커밋에 `tb/recheck-registered/pr-<번호>` 상태로 Orca Run ID를 기록합니다. 이 상태는 등록 기록이고 두 필수 리뷰 판정은 따로 올라갑니다. 맥을 바꿔 재개할 때도 GitHub에서 등록한 Run을 확인합니다. 그 Run의 작업 기록을 복원할 수 없으면 기존 SHA의 병합을 보류하고 새 커밋에서 리뷰를 다시 시작합니다.
 
 GitHub Actions가 이름이 `TB CI`인 검사를 게시합니다. Claude·Codex 판정은 마스터의 GitHub 계정으로 별개의 커밋 상태에 게시하며, Orca 작업자 두 명의 완료 기록과 최종 SHA를 대조합니다. 리뷰 공급자 두 곳이 GitHub에 각각 로그인하는 방식은 사용하지 않습니다.
 

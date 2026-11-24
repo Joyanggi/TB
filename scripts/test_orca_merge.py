@@ -1,15 +1,13 @@
 import io
 import json
 import subprocess
-import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stdout
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from orca_merge import (
-    Blocked, merge_or_queue, process_pr, protected_paths, review_record,
+    Blocked, merge_or_queue, process_pr, protected_paths, recheck_context, registered_recheck,
     verify_branch_rules, verify_pr, verify_review, verify_review_pair,
 )
 
@@ -83,35 +81,45 @@ class MergeGateTests(unittest.TestCase):
 
     @patch("orca_merge.orca")
     @patch("orca_merge.verify_branch_rules")
+    @patch("orca_merge.registered_recheck", side_effect=[None, "run_recheck", "run_recheck"])
     @patch("orca_merge.github")
     @patch("orca_merge.run")
-    def test_registration_binds_the_pr_head_to_one_run_across_invocations(
-        self, run, github, verify_branch_rules, orca,
+    def test_registration_is_published_once_and_blocks_another_run(
+        self, run, github, registration, verify_branch_rules, orca,
     ):
         pr = dict(state="OPEN", isCrossRepository=False, baseRefName="main",
                   headRefName="orca/example", headRefOid=self.sha, isDraft=True, url="https://example.invalid")
         run.return_value = json.dumps(pr)
+        github.return_value = {"login": "Joyanggi"}
         args = Namespace(pr=6, sha=self.sha, run="run_recheck", require_recheck=True)
-        with tempfile.TemporaryDirectory() as temporary, patch(
-            "orca_merge.REVIEW_RECORDS", Path(temporary)
-        ), redirect_stdout(io.StringIO()):
-            with review_record(args.pr, self.sha) as record:
-                process_pr(args, record)
-            with review_record(args.pr, self.sha) as record:
-                process_pr(args, record)
+        with redirect_stdout(io.StringIO()):
+            process_pr(args)
+            process_pr(args)
             orca.assert_called_once_with("run-show", "--id", "run_recheck")
+            posts = [call.args for call in github.call_args_list if call.args[:1] == ("-X",)]
+            self.assertEqual(len(posts), 1)
+            self.assertIn(f"context={recheck_context(args.pr)}", posts[0])
 
             old_run = Namespace(pr=args.pr, sha=self.sha, run="run_initial", require_recheck=False)
-            with review_record(args.pr, self.sha) as record, self.assertRaisesRegex(
-                Blocked, "run registered"
-            ):
-                process_pr(old_run, record)
+            with self.assertRaisesRegex(Blocked, "run registered"):
+                process_pr(old_run)
             orca.assert_called_once()
 
-            with review_record(args.pr + 1, self.sha) as record:
-                self.assertEqual(record.read(), "")
-            with review_record(args.pr, "2" * 40) as record:
-                self.assertEqual(record.read(), "")
+    @patch("orca_merge.github")
+    def test_registration_uses_paginated_github_history_and_checks_the_publisher(self, github):
+        entry = dict(context=recheck_context(6), description="Orca run run_recheck",
+                     state="success", creator={"login": "Joyanggi"})
+        github.return_value = [[{**entry, "context": recheck_context(7)}], [entry]]
+        self.assertEqual(registered_recheck(6, self.sha), "run_recheck")
+        github.assert_called_once_with(
+            f"repos/Joyanggi/TB/commits/{self.sha}/statuses?per_page=100", "--paginate", "--slurp",
+        )
+        self.assertIsNone(registered_recheck(8, self.sha))
+        for bad in ({"creator": {"login": "other"}}, {"description": "Orca run run_other"},
+                    {"state": "failure"}):
+            github.return_value = [[entry], [{**entry, **bad}]]
+            with self.subTest(bad=bad), self.assertRaises(Blocked):
+                registered_recheck(6, self.sha)
 
     def test_branch_rules_require_the_github_actions_publisher(self):
         checks = [dict(context="TB CI", integration_id=15368),
