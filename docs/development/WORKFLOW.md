@@ -49,7 +49,7 @@ Orca의 **설정 → 채팅 UI → 사용 한도가 재설정되면 채팅을 �
 - `README.md`에 재현 가능한 설치, 실행, 검증 명령을 추가합니다.
 - 프로젝트가 생성한 코드와 파일 배치를 기준으로 고정된 규칙이 필요한 곳에 `.claude/rules/`를 둡니다.
 - 초기 CI는 문서 diff와 병합 스크립트를 검사합니다. 앱 생성 후 같은 CI가 Node 24와 npm 잠금 파일로 린트·타입 검사·테스트를 실행하게 `package.json`에 명령을 정의합니다. `/verify`에도 실제 검증 명령을 기록합니다. 오케스트레이션 권한(Orca 명령, 읽기 전용 git, 비밀 경로 읽기 거부)은 `.claude/settings.json`에 미리 적용했습니다. `.claude/`와 `REVIEW.md`는 Edit·Write 도구에 승인 프롬프트(ask)를 걸어 두었습니다. Bash를 통한 쓰기와 허용한 읽기 전용 git의 우회는 이 규칙으로 막지 못하므로 리뷰에서 "판정 기준 변경"으로 걸러내며, 단계 0에서 샌드박스 적용과 실제 동작을 확인합니다(R-27). 앱 스크립트(`npm run lint/typecheck/test`) 권한은 앱 초기화 뒤 실제 스크립트에 맞춰 좁히고, 훅은 필요한 시점에 추가합니다.
-- 첫 iOS 개발 빌드는 실기기에서 확인합니다. 연결 전에는 [테스트 전략](../quality/TEST-STRATEGY.md#iphone을-연결할-수-없을-때)에 따라 가능한 검사부터 진행합니다. 병합 전 실기기가 필요한 변경은 [체크리스트](../quality/RELIABILITY-CHECKLIST.md)를 실행할 준비가 됐을 때 연결을 요청합니다.
+- iOS 앱 화면은 [테스트 전략](../quality/TEST-STRATEGY.md#ios-앱-검증-대상-선택)에 따라 연결된 iPhone의 Mobile MCP를 우선 사용하고, iPhone을 이용할 수 없으면 Mac 로컬 iOS 시뮬레이터에서 확인합니다. 첫 실기기 빌드와 변경에 필요한 기기별 검사는 [체크리스트](../quality/RELIABILITY-CHECKLIST.md)를 실행할 준비가 됐을 때 연결을 요청합니다.
 
 ## 마스터 병합 실행기 (맥에 1회 설치)
 
