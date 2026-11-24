@@ -113,6 +113,26 @@ def verify_branch_rules(rules):
         raise Blocked("main is missing the PR-only or required-check protection.")
 
 
+def merge_or_queue(pr_number, sha, get_pr):
+    command = ("gh", "pr", "merge", str(pr_number), "--repo", REPO,
+               "--squash", "--match-head-commit", sha)
+    pr = get_pr()
+    verify_pr(pr, sha)
+    if pr.get("mergeStateStatus") == "CLEAN":
+        return run(*command)
+    try:
+        return run(*command, "--auto")
+    except subprocess.CalledProcessError:
+        # The last required check can settle while GitHub is receiving the request.
+        pr = get_pr()
+        if pr.get("state") == "MERGED" and pr.get("headRefOid") == sha:
+            return pr["url"]
+        verify_pr(pr, sha)
+        if pr.get("mergeStateStatus") != "CLEAN":
+            raise
+        return run(*command)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pr", type=int, required=True)
@@ -133,7 +153,7 @@ def main():
     def get_pr():
         return json.loads(run(
             "gh", "pr", "view", str(args.pr), "--repo", REPO, "--json",
-            "baseRefName,headRefName,headRefOid,isCrossRepository,isDraft,state,url,changedFiles",
+            "baseRefName,headRefName,headRefOid,isCrossRepository,isDraft,state,url,changedFiles,mergeStateStatus",
         ))
 
     try:
@@ -168,10 +188,7 @@ def main():
             )
         if pr["isDraft"]:
             run("gh", "pr", "ready", str(args.pr), "--repo", REPO)
-        print(run(
-            "gh", "pr", "merge", str(args.pr), "--repo", REPO,
-            "--squash", "--auto", "--match-head-commit", args.sha,
-        ).strip() or pr["url"])
+        print(merge_or_queue(args.pr, args.sha, get_pr).strip() or pr["url"])
     except (Blocked, OSError, subprocess.CalledProcessError, ValueError, KeyError) as exc:
         parser.exit(1, f"Auto-merge blocked: {exc}\n")
 

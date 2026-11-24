@@ -43,6 +43,7 @@
       "Bash(git fetch origin main)",
       "Bash(git push origin *:refs/heads/orca/*)",
       "Bash(gh pr create --repo Joyanggi/TB --base main --head orca/*)",
+      "Bash(gh pr edit * --repo Joyanggi/TB --body-file *)",
       "Bash(gh pr view *)",
       "Bash(gh pr checks *)",
       "Bash(/opt/homebrew/bin/tb-orca-merge *)"
