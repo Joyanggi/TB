@@ -1,5 +1,5 @@
 {
-  "model": "sonnet",
+  "model": "opus",
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
@@ -29,9 +29,18 @@
       "Bash(npm run typecheck *)",
       "Bash(npm run test *)",
       "Bash(npm test *)",
+      "Bash(npx create-expo-app *)",
+      "Bash(npm ci)",
       "Bash(orca orchestration task-update *)",
       "Bash(orca orchestration worker-read *)",
       "Bash(orca orchestration request-show *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.codex/auth.json)",
+      "Read(~/.ssh/**)"
     ]
-  }
+  },
+  "effortLevel": "high"
 }
