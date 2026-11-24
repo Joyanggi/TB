@@ -36,6 +36,8 @@ orca agent launch --environment local --worktree 'branch:orca/coordinator' \
 4. 별도 리뷰 세션이나 Claude Code `reviewer`에 기준 브랜치, diff, 인수 기준, 검증 결과를 넘깁니다. 리뷰어가 확인한 문제를 개발 세션에서 고치고 관련 검사를 다시 실행합니다.
 5. [커밋·이슈·PR 작성 규칙](PR-ISSUE-GUIDE.md)에 맞춰 Draft PR을 올립니다. 마스터는 최종 커밋의 Claude·Codex 완료 보고 두 건을 [병합 스크립트](../../scripts/orca_merge.py)로 검증합니다. GitHub에서 `TB CI`, `tb/review-claude`, `tb/review-codex`가 통과해야 squash 병합됩니다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 제품 결정이 남은 PR은 사람의 확인을 받습니다. 첫 실기기 테스트에서 기기 조작이 필요한 시점에 iPhone 연결을 요청합니다.
 
+두 독립 리뷰의 판정이나 중요한 지적이 갈리면 마스터가 양쪽 근거를 정리해 Claude와 Codex에 같은 쟁점을 보냅니다. 두 에이전트가 동일한 커밋을 읽기 전용으로 다시 검토합니다. 재검토가 기록된 커밋에는 병합 실행기가 재검토 두 건의 `PASS`를 요구합니다. 쟁점이 해소된 근거와 최종 판정은 PR에 남깁니다.
+
 ## 앱을 만든 뒤 연결할 항목
 
 - `README.md`에 재현 가능한 설치, 실행, 검증 명령을 추가합니다.

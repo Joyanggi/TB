@@ -73,6 +73,20 @@ def verify_review(run_id, sha, role, dispatch_id, worker, tasks):
     return task["id"]
 
 
+def verify_review_pair(sha, task_ids, tasks):
+    selected = set(task_ids.values())
+    if len(selected) != len(REVIEWERS):
+        raise Blocked("The two reviews must be separate tasks.")
+    marker = f"TB-REVIEW-RECHECK {sha}"
+    rechecks = {
+        task_id for task_id, task in tasks.items()
+        if marker in (task.get("spec") or "").splitlines()
+    }
+    # A recorded recheck supersedes the first pair even before either recheck finishes.
+    if rechecks and selected != rechecks:
+        raise Blocked("Both PASS reports must come from the disagreement recheck for this SHA.")
+
+
 def protected_paths(pages, expected_count):
     changes = [change for page in pages for change in page]
     # GitHub returns at most 3,000 files, irrespective of pagination.
@@ -166,8 +180,7 @@ def main():
                                 orca("worker-show", "--dispatch", getattr(args, role)), tasks)
             for role in REVIEWERS
         }
-        if len(set(task_ids.values())) != len(REVIEWERS):
-            raise Blocked("The two reviews must be separate tasks.")
+        verify_review_pair(args.sha, task_ids, tasks)
         if args.verify_only:
             print(json.dumps({"sha": args.sha, "reviews": task_ids, "pr": pr["url"]}))
             return

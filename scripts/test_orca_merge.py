@@ -3,7 +3,10 @@ import subprocess
 import unittest
 from unittest.mock import Mock, patch
 
-from orca_merge import Blocked, merge_or_queue, protected_paths, verify_branch_rules, verify_pr, verify_review
+from orca_merge import (
+    Blocked, merge_or_queue, protected_paths, verify_branch_rules, verify_pr,
+    verify_review, verify_review_pair,
+)
 
 
 class MergeGateTests(unittest.TestCase):
@@ -41,6 +44,35 @@ class MergeGateTests(unittest.TestCase):
         for changes in ({"headRefOid": "2" * 40}, {"isCrossRepository": True}, {"baseRefName": "else"}):
             with self.subTest(changes=changes), self.assertRaises(Blocked):
                 verify_pr({**pr, **changes}, self.sha)
+
+    def test_initial_pair_can_pass_when_there_is_no_recheck_for_this_sha(self):
+        initial = {"claude": "task_1", "codex": "task_2"}
+        tasks = {
+            "task_1": {"spec": f"TB-REVIEW-TARGET {self.sha}"},
+            "task_2": {"spec": f"TB-REVIEW-TARGET {self.sha}"},
+            "task_other": {"spec": f"TB-REVIEW-RECHECK {'2' * 40}"},
+        }
+        verify_review_pair(self.sha, initial, tasks)
+
+    def test_recheck_supersedes_the_initial_pair_as_soon_as_it_is_recorded(self):
+        initial = {"claude": "task_1", "codex": "task_2"}
+        recheck = {"claude": "task_3", "codex": "task_4"}
+        marked = {"spec": f"TB-REVIEW-TARGET {self.sha}\nTB-REVIEW-RECHECK {self.sha}"}
+        tasks = {"task_1": {}, "task_2": {}, "task_3": marked}
+
+        with self.assertRaises(Blocked):
+            verify_review_pair(self.sha, initial, tasks)
+
+        tasks["task_4"] = marked
+        for stale in (initial, {"claude": "task_1", "codex": "task_4"}):
+            with self.subTest(pair=stale), self.assertRaises(Blocked):
+                verify_review_pair(self.sha, stale, tasks)
+        verify_review_pair(self.sha, recheck, tasks)
+
+        # Retries use the same task. An unexpected third recheck task cannot be ignored.
+        tasks["task_extra"] = marked
+        with self.assertRaises(Blocked):
+            verify_review_pair(self.sha, recheck, tasks)
 
     def test_branch_rules_require_the_github_actions_publisher(self):
         checks = [dict(context="TB CI", integration_id=15368),
