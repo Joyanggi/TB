@@ -31,11 +31,11 @@ orca agent launch --environment local --worktree "path:$(git rev-parse --show-to
 트바 마스터가 새 Run을 시작하기 전과 GitHub PR의 실제 병합을 확인한 뒤에, 로컬 `main`을 `origin/main`으로 fast-forward합니다. GitHub 웹에서 병합한 변경은 다음 요청을 시작할 때 반영합니다.
 
 1. 트바의 로컬 `main` 워크트리에서 `git branch --show-current`와 `git status`를 확인합니다. 브랜치가 `main`이고 워크트리가 깨끗하며 진행 중인 Git 작업이 없을 때 갱신합니다.
-2. `git fetch origin main`을 실행합니다. `git rev-parse FETCH_HEAD origin/main`의 두 해시가 같은지 확인한 뒤, `git log --oneline origin/main..HEAD`가 비어 있는지 확인합니다. 로컬에만 있는 커밋이 있으면 상태를 보존합니다.
-3. 브랜치와 상태를 다시 확인한 뒤 아래 명령을 실행합니다. 같은 워크트리에서 수동으로 브랜치를 전환하거나 파일을 변경하는 작업과 겹치지 않게 진행합니다.
+2. `git fetch origin main`을 실행합니다. `git rev-parse FETCH_HEAD origin/main`의 두 해시가 같은지 확인한 뒤, `git log --oneline origin/main..HEAD`가 비어 있는지 확인합니다. 로컬에만 있는 커밋이 있으면 상태를 보존합니다. PR 병합 직후에는 실제 병합 커밋을 `git merge-base --is-ancestor <병합 SHA> origin/main`으로 확인합니다. 포함되지 않았으면 로컬 갱신을 보류합니다.
+3. `git branch --show-current`와 `git status`를 다시 확인한 뒤 아래 명령을 실행합니다. 같은 워크트리에서 수동으로 브랜치를 전환하거나 파일을 변경하는 작업과 겹치지 않게 진행합니다.
 
    ```sh
-   git merge --ff-only --no-overwrite-ignore --no-autostash origin/main
+   git merge --ff-only --no-squash --no-overwrite-ignore --no-autostash origin/main
    ```
 
 4. `git branch --show-current`가 `main`이고 `git rev-parse HEAD origin/main`의 두 해시가 같으면 갱신 완료입니다. 최신 작성 규칙과 마스터 절차를 읽고 작업을 시작합니다. 점검이나 갱신이 실패하면 원인을 남기고 새 Run을 보류합니다. PR이 이미 병합됐다면 GitHub 병합 결과와 로컬 갱신 결과를 각각 알립니다.

@@ -72,7 +72,7 @@ argument-hint: "[아이디어 또는 작업]"
 7. 여러 브랜치를 통합하는 경우 먼저 별도 통합 worktree에서 정확한 커밋들을 합치고, 합친 결과에 대해 검사와 최종 리뷰(위 병렬 리뷰)를 한다. 중요 지적은 구현 작업자에게 전달하고 변경된 검사와 리뷰를 다시 실행한다. 현재 권한 및 환경에서 확인하지 못한 것은 결과에 명시한다. 통합한 최종 SHA를 PR에 올리고 그 SHA에 대해 두 리뷰를 받는다.
 8. **자동 병합**: 열린 제품 결정과 미통과 검사가 없고 두 리뷰가 같은 SHA를 통과시켰으면 마스터는 맥에 설치된 검토 완료 병합 실행기로 `/opt/homebrew/bin/tb-orca-merge --pr <번호> --sha <전체 SHA> --run <Run ID> --claude <Dispatch ID> --codex <Dispatch ID>`를 실행한다. 이견 재검토가 있었으면 그 두 Dispatch ID를 전달한다. 스크립트는 보존된 두 보고와 GitHub 보호 규칙을 검사하고 상태 체크를 게시한 뒤 squash 자동 병합을 요청한다. GitHub가 CI도 통과한 경우에만 병합한다. `main` 변경으로 작업 브랜치가 뒤처지면 최신 `origin/main`을 반영하고 새 SHA에서 다시 검사·리뷰한다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 별도 사람 결정이 필요한 PR은 Draft로 남기고 사람에게 넘긴다. 배포는 별도 요청에 따른다.
 
-   - **병합 후 갱신**: `gh pr view --repo Joyanggi/TB <번호> --json state,mergeCommit`에서 `MERGED`와 병합 커밋을 확인하면 [로컬 main 갱신](../../../docs/development/WORKFLOW.md#로컬-main-갱신)을 실행한다. 자동 병합이 대기 중이면 같은 Run에서 확인을 이어간다. 종료 전에 병합을 확인하지 못하면 대기 상태를 기록하고 다음 요청의 갱신에서 반영한다.
+   - **병합 후 갱신**: `gh pr view --repo Joyanggi/TB <번호> --json state,mergeCommit`에서 `MERGED`와 병합 커밋을 확인하고 그 SHA를 기준으로 [로컬 main 갱신](../../../docs/development/WORKFLOW.md#로컬-main-갱신)을 실행한다. 자동 병합이 대기 중이면 같은 Run에서 확인을 이어간다. 종료 전에 병합을 확인하지 못하면 대기 상태를 기록하고 다음 요청의 갱신에서 반영한다.
    - **필수 실기기 확인**: 해당 SHA의 필수 실기기 검사가 미실행이면 병합 실행기 호출을 보류하고 같은 Draft에서 [검증 절차](../verify/SKILL.md)를 완료한다.
 
 ## 사용량 한도에서 재개
