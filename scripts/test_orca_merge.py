@@ -4,13 +4,92 @@ import subprocess
 import unittest
 from argparse import Namespace
 from contextlib import nullcontext, redirect_stderr, redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from orca_merge import (
     Blocked, RECHECK_CONTEXT, assess_pr, merge_or_queue, process_pr, protected_paths,
     registered_recheck, review_lock, review_statuses, verify_branch_rules, verify_pr, verify_review,
-    verify_review_pair,
+    sync_main, verify_review_pair,
 )
+
+
+class SyncMainTests(unittest.TestCase):
+    def setUp(self):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        self.upstream = root / "upstream"
+        self.primary = root / "base checkout"
+        self.coordinator = root / "트바 마스터"
+        self.git(root, "init", "-q", "-b", "main", str(self.upstream))
+        self.original = self.commit(self.upstream, "Initial")
+        self.git(root, "clone", "-q", str(self.upstream), str(self.primary))
+        self.git(self.primary, "worktree", "add", "-q", "-b", "orca/coordinator", str(self.coordinator))
+
+    def git(self, checkout, *args):
+        return subprocess.run(
+            ("git", "-C", str(checkout), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+             "-c", "user.name=Test", "-c", "user.email=test@example.invalid", *args),
+            check=True, text=True, capture_output=True,
+        ).stdout
+
+    def commit(self, checkout, message):
+        (checkout / "tracked.txt").write_text(message + "\n", encoding="utf-8")
+        self.git(checkout, "add", "tracked.txt")
+        self.git(checkout, "commit", "-qm", message)
+        return self.git(checkout, "rev-parse", "HEAD").strip()
+
+    def sync(self):
+        def local_commands(*argv):
+            if argv[0] == "gh":
+                self.assertEqual(argv, ("gh", "repo", "view", str(self.upstream),
+                                        "--json", "nameWithOwner", "--jq", ".nameWithOwner"))
+                return "Joyanggi/TB\n"
+            self.assertEqual(argv[0], "git")
+            return self.git(self.coordinator, *argv[1:])
+
+        output = io.StringIO()
+        with patch("orca_merge.run", side_effect=local_commands), redirect_stdout(output):
+            success = sync_main()
+        return success, json.loads(output.getvalue())
+
+    def test_fast_forwards_both_checked_out_worktrees(self):
+        target = self.commit(self.upstream, "Merged PR")
+        expected = {"origin/main": target, "main": "synced", "orca/coordinator": "synced"}
+        self.assertEqual(self.sync(), (True, expected))
+        self.assertEqual(self.sync(), (True, expected))
+        self.assertEqual(self.git(self.primary, "rev-parse", "HEAD").strip(), target)
+        self.assertEqual((self.coordinator / "tracked.txt").read_text(), "Merged PR\n")
+
+    def test_updates_local_main_without_checking_it_out(self):
+        self.git(self.primary, "switch", "--detach")
+        target = self.commit(self.upstream, "Merged PR")
+        self.assertEqual(self.sync()[1]["main"], "synced")
+        self.assertEqual(self.git(self.primary, "rev-parse", "refs/heads/main").strip(), target)
+        self.assertEqual(self.git(self.primary, "rev-parse", "HEAD").strip(), self.original)
+
+    def test_preserves_dirty_checkout_and_reports_each_branch(self):
+        self.commit(self.upstream, "Merged PR")
+        (self.primary / "tracked.txt").write_text("User edit on main")
+        (self.coordinator / "untracked.txt").write_text("User file on coordinator")
+        success, result = self.sync()
+        self.assertFalse(success)
+        self.assertEqual(result["main"], "local-changes")
+        self.assertEqual(result["orca/coordinator"], "local-changes")
+        self.assertEqual((self.primary / "tracked.txt").read_text(), "User edit on main")
+        self.assertEqual((self.coordinator / "untracked.txt").read_text(), "User file on coordinator")
+
+    def test_does_not_move_diverged_coordinator(self):
+        local = self.commit(self.coordinator, "Local coordinator commit")
+        target = self.commit(self.upstream, "Merged PR")
+        success, result = self.sync()
+        self.assertFalse(success)
+        self.assertEqual(result["main"], "synced")
+        self.assertEqual(result["orca/coordinator"], "git-refused")
+        self.assertEqual(self.git(self.primary, "rev-parse", "HEAD").strip(), target)
+        self.assertEqual(self.git(self.coordinator, "rev-parse", "HEAD").strip(), local)
 
 
 class MergeGateTests(unittest.TestCase):

@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Publish two Orca verdicts for a PR head and request GitHub auto-merge."""
+"""Gate TrustBite PR merges and synchronize the local coordinator."""
 
 import argparse
 import json
@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 REPO = "Joyanggi/TB"
 REPO_OWNER = REPO.split("/", 1)[0].casefold()
 BASE = "main"
+COORDINATOR = "orca/coordinator"
 CI = "TB CI"
 GITHUB_ACTIONS_APP_ID = 15368
 REVIEWERS = ("claude", "codex")
@@ -29,11 +30,59 @@ PROTECTED = (
 
 
 class Blocked(Exception):
-    """A precondition for publishing or merging is missing."""
+    """A precondition for merging or synchronizing is missing."""
 
 
 def run(*argv):
     return subprocess.run(argv, check=True, text=True, stdout=subprocess.PIPE).stdout
+
+
+def sync_branch(branch, worktree, target):
+    ref = f"refs/heads/{branch}"
+    if worktree is None:
+        # Local transport applies Git's fast-forward and checked-out branch checks.
+        run("git", "fetch", "--no-tags", "--no-write-fetch-head", ".", f"{target}:{ref}")
+        return "synced"
+
+    git = ("git", "-C", worktree)
+    if run(*git, "symbolic-ref", "--quiet", "HEAD").strip() != ref:
+        return "checkout-changed"
+    if run(*git, "status", "--porcelain", "--untracked-files=normal"):
+        return "local-changes"
+    run(*git, "merge", "--ff-only", "--no-overwrite-ignore", target)
+    return "synced" if run(*git, "rev-parse", "HEAD").strip() == target else "local-commits"
+
+
+def sync_main():
+    if run("git", "symbolic-ref", "--quiet", "HEAD").strip() != f"refs/heads/{COORDINATOR}":
+        raise Blocked("Run synchronization from the TrustBite coordinator worktree.")
+
+    origin = run("git", "remote", "get-url", "origin").strip()
+    repository = run("gh", "repo", "view", origin, "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+    if repository.strip().casefold() != REPO.casefold():
+        raise Blocked("The coordinator's origin is not the TrustBite repository.")
+
+    upstream = f"refs/remotes/origin/{BASE}"
+    run("git", "fetch", "--no-tags", "--no-write-fetch-head", "origin", f"refs/heads/{BASE}:{upstream}")
+    target = run("git", "rev-parse", "--verify", upstream).strip()
+    worktrees = {}
+    for record in run("git", "worktree", "list", "--porcelain", "-z").split("\0\0"):
+        fields = dict(field.split(" ", 1) for field in record.split("\0") if " " in field)
+        if "branch" in fields:
+            worktrees[fields["branch"]] = fields["worktree"]
+
+    result = {}
+    for branch in (BASE, COORDINATOR):
+        worktree = worktrees.get(f"refs/heads/{branch}")
+        if branch == COORDINATOR and worktree is None:
+            result[branch] = "checkout-changed"
+            continue
+        try:
+            result[branch] = sync_branch(branch, worktree, target)
+        except subprocess.CalledProcessError:
+            result[branch] = "git-refused"
+    print(json.dumps({"origin/main": target, **result}))
+    return result[COORDINATOR] == "synced"
 
 
 def github(*args):
@@ -268,18 +317,29 @@ def assess_pr(args, get_pr):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pr", type=int, required=True)
-    parser.add_argument("--sha", required=True)
-    parser.add_argument("--run", required=True)
+    parser.add_argument("--pr", type=int)
+    parser.add_argument("--sha")
+    parser.add_argument("--run")
     parser.add_argument("--claude")
     parser.add_argument("--codex")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--verify-only", action="store_true")
     mode.add_argument("--require-recheck", action="store_true")
+    mode.add_argument("--sync-main", action="store_true")
     args = parser.parse_args()
+    if args.sync_main:
+        if any(value is not None for value in (args.pr, args.sha, args.run, args.claude, args.codex)):
+            parser.error("--sync-main takes no PR or review arguments.")
+        try:
+            if not sync_main():
+                parser.exit(1, "Coordinator synchronization deferred. See the branch status above.\n")
+        except (Blocked, OSError, subprocess.CalledProcessError) as exc:
+            parser.exit(1, f"Synchronization blocked: {exc}\n")
+        return
+
     if (
-        args.pr < 1 or not re.fullmatch(r"[a-f0-9]{40}", args.sha)
-        or not re.fullmatch(r"run_[a-z0-9]+", args.run)
+        not args.pr or args.pr < 1 or not re.fullmatch(r"[a-f0-9]{40}", args.sha or "")
+        or not re.fullmatch(r"run_[a-z0-9]+", args.run or "")
     ):
         parser.error("Expected a PR number, full Git SHA and Orca run.")
     refs = (args.claude, args.codex)

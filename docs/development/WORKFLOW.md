@@ -16,7 +16,7 @@ orca worktree activate --environment local --worktree 'branch:orca/coordinator'
 /orchestrate 방문 인증 배지가 있는 리뷰와 없는 리뷰를 구분해 보여줘.
 ```
 
-작성 규칙이나 마스터 절차가 `main`에 병합되면, 마스터 작업을 마치고 변경 사항이 없는 상태에서 해당 워크트리 터미널의 `git pull --ff-only origin main`으로 갱신합니다. 다음 요청을 시작할 때 갱신된 작성 규칙과 마스터 절차를 읽습니다.
+기존 마스터 채팅에서 새 요청을 받으면 [로컬 main 동기화](#로컬-main-동기화)를 실행하고 최신 작성 규칙과 마스터 절차를 읽습니다.
 
 마스터 채팅을 처음부터 만들 때만 아래 명령을 사용합니다. 첫 프롬프트는 준비 확인만 요청하므로, 응답을 받은 뒤 작업을 보냅니다.
 
@@ -37,6 +37,16 @@ orca agent launch --environment local --worktree 'branch:orca/coordinator' \
 5. [커밋·이슈·PR 작성 규칙](PR-ISSUE-GUIDE.md)에 맞춰 Draft PR을 올립니다. 마스터는 최종 커밋의 Claude·Codex 완료 보고 두 건을 [병합 스크립트](../../scripts/orca_merge.py)로 검증합니다. GitHub에서 `TB CI`, `tb/review-claude`, `tb/review-codex`가 통과해야 squash 병합됩니다. 하네스·권한·CI·판정 기준·운영 DB 마이그레이션 변경과 제품 결정이 남은 PR은 사람의 확인을 받습니다. 첫 실기기 테스트에서 기기 조작이 필요한 시점에 iPhone 연결을 요청합니다.
 
 두 독립 리뷰의 판정이나 중요한 지적이 갈리면 마스터가 양쪽 근거를 정리해 Claude와 Codex에 같은 쟁점을 보냅니다. 먼저 병합 실행기로 Draft PR 번호와 최종 SHA의 재검토 Run을 등록한 뒤 두 리뷰를 시작합니다. 병합 실행기는 그 Run의 재검토 `PASS` 두 건을 요구합니다. 쟁점이 해소된 근거와 최종 판정은 PR에 남깁니다.
+
+## 로컬 main 동기화
+
+마스터는 GitHub에서 PR 병합을 확인한 뒤와 새 요청을 시작하기 전에 트바 마스터 worktree에서 아래 명령을 실행합니다. GitHub 웹에서 직접 병합한 변경도 다음 요청을 시작할 때 반영합니다.
+
+```sh
+/opt/homebrew/bin/tb-orca-merge --sync-main
+```
+
+실행기는 `origin/main`의 한 커밋을 기준으로 로컬 `main`과 `orca/coordinator`를 각각 fast-forward합니다. 다른 worktree가 쓰는 `main`은 해당 폴더에서 갱신합니다. 미커밋 변경, 로컬 커밋 또는 Git의 안전 검사에 걸린 브랜치는 그 상태를 남깁니다. `orca/coordinator`가 동기화되지 않으면 마스터가 원인을 보고하고 새 작업 시작을 보류합니다. 로컬 `main`만 보류됐으면 마스터와 새 작업자의 기준은 확인된 `origin/main`을 사용합니다.
 
 ## 사용량 한도와 작업 재개
 
