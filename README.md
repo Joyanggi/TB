@@ -4,7 +4,7 @@
 
 ## 시작하기
 
-Orca에서 **Local Mac → TB → 트바 마스터**를 열고 `/orchestrate <하고 싶은 작업>`을 보냅니다. [마스터 열기와 다시 시작하기](docs/development/WORKFLOW.md#트바-마스터-열기)에 터미널 명령과 시작 프롬프트가 있습니다.
+Orca의 **트바 마스터 열기**로 로컬 `main`을 연 뒤 **트바 마스터** 채팅에 `/orchestrate <하고 싶은 작업>`을 보냅니다. [마스터 열기와 다시 시작하기](docs/development/WORKFLOW.md#트바-마스터-열기)에 터미널 명령과 시작 프롬프트가 있습니다.
 
 1. [Claude에게 보낼 시작 요청문](docs/development/CLAUDE-HANDOFF.md)에 앱 아이디어를 적고, Orca의 이 저장소에서 Claude Code를 열어 붙여넣습니다.
 2. 요구사항과 첫 버전 범위를 확정하고, 개발 환경과 검증 계획을 정합니다.
