@@ -4,10 +4,10 @@
 
 ## 트바 마스터 열기
 
-Orca 사이드바에서 **Local Mac → TB → 트바 마스터**의 기존 Claude 채팅을 엽니다. 채팅 탭을 닫았다면 해당 워크트리의 **에이전트 세션 기록**에서 `트바 마스터`를 재개합니다. 터미널에서도 워크트리를 열 수 있습니다. Orca가 꺼져 있으면 먼저 `orca open`을 실행합니다.
+Orca의 빠른 명령 **트바 마스터 열기** 또는 사이드바 **Local Mac → TB → main**을 엽니다. 해당 워크트리의 **트바 마스터** Claude 채팅을 사용합니다. 채팅 탭을 닫았다면 `main`의 **에이전트 세션 기록**에서 재개합니다. 터미널에서 원본 체크아웃의 루트로 이동해 아래 명령을 실행해도 됩니다.
 
 ```sh
-orca worktree activate --environment local --worktree 'branch:orca/coordinator'
+orca worktree activate --environment local --worktree "path:$(git rev-parse --show-toplevel)"
 ```
 
 마스터에 목표를 한 문장으로 보내면 됩니다. 구체적인 완료 조건이 이미 있다면 함께 적습니다.
@@ -16,15 +16,29 @@ orca worktree activate --environment local --worktree 'branch:orca/coordinator'
 /orchestrate 방문 인증 배지가 있는 리뷰와 없는 리뷰를 구분해 보여줘.
 ```
 
-작성 규칙이나 마스터 절차가 `main`에 병합되면, 마스터 작업을 마치고 변경 사항이 없는 상태에서 해당 워크트리 터미널의 `git pull --ff-only origin main`으로 갱신합니다. 다음 요청을 시작할 때 갱신된 작성 규칙과 마스터 절차를 읽습니다.
+마스터는 로컬 `main`에서 작업 배분, 리뷰, 병합 확인을 맡습니다. 구현과 커밋은 작업별 브랜치에서 진행합니다. 기존 채팅에서는 좌측 워크트리가 `main`인지 확인한 뒤 그대로 새 요청을 보내면 됩니다.
 
 마스터 채팅을 처음부터 만들 때만 아래 명령을 사용합니다. 첫 프롬프트는 준비 확인만 요청하므로, 응답을 받은 뒤 작업을 보냅니다.
 
 ```sh
-orca agent launch --environment local --worktree 'branch:orca/coordinator' \
+orca agent launch --environment local --worktree "path:$(git rev-parse --show-toplevel)" \
   --agent claude --model claude-opus-5-5 --effort high --surface chat --focus \
   --prompt '트바 마스터로 준비해줘. CLAUDE.md와 AGENTS.md, /orchestrate 절차를 읽고 준비됐다고 알려줘. 작업 실행은 내 다음 요청부터 시작해줘.'
 ```
+
+## 로컬 main 갱신
+
+트바 마스터가 새 Run을 시작하기 전과 GitHub PR의 실제 병합을 확인한 뒤에, 로컬 `main`을 `origin/main`으로 fast-forward합니다. GitHub 웹에서 병합한 변경은 다음 요청을 시작할 때 반영합니다.
+
+1. 트바의 로컬 `main` 워크트리에서 `git branch --show-current`와 `git status`를 확인합니다. 브랜치가 `main`이고 워크트리가 깨끗하며 진행 중인 Git 작업이 없을 때 갱신합니다.
+2. `git fetch origin main`을 실행합니다. `git rev-parse FETCH_HEAD origin/main`의 두 해시가 같은지 확인한 뒤, `git log --oneline origin/main..HEAD`가 비어 있는지 확인합니다. 로컬에만 있는 커밋이 있으면 상태를 보존합니다.
+3. 브랜치와 상태를 다시 확인한 뒤 아래 명령을 실행합니다. 같은 워크트리에서 수동으로 브랜치를 전환하거나 파일을 변경하는 작업과 겹치지 않게 진행합니다.
+
+   ```sh
+   git merge --ff-only --no-overwrite-ignore --no-autostash origin/main
+   ```
+
+4. `git branch --show-current`가 `main`이고 `git rev-parse HEAD origin/main`의 두 해시가 같으면 갱신 완료입니다. 최신 작성 규칙과 마스터 절차를 읽고 작업을 시작합니다. 점검이나 갱신이 실패하면 원인을 남기고 새 Run을 보류합니다. PR이 이미 병합됐다면 GitHub 병합 결과와 로컬 갱신 결과를 각각 알립니다.
 
 ## 작업부터 병합까지
 
