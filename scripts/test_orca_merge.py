@@ -81,6 +81,38 @@ class SyncMainTests(unittest.TestCase):
         self.assertEqual((self.primary / "tracked.txt").read_text(), "User edit on main")
         self.assertEqual((self.coordinator / "untracked.txt").read_text(), "User file on coordinator")
 
+    def test_checkout_switch_during_sync_does_not_move_other_branch(self):
+        self.git(self.coordinator, "branch", "unrelated")
+        self.commit(self.upstream, "Merged PR")
+        git = self.git
+
+        def switch_after_status(checkout, *args):
+            result = git(checkout, *args)
+            if args[:1] == ("-C",) and args[2:4] == ("status", "--porcelain"):
+                if Path(args[1]).resolve() == self.coordinator.resolve():
+                    git(self.coordinator, "switch", "unrelated")
+            return result
+
+        with patch.object(self, "git", side_effect=switch_after_status):
+            success, result = self.sync()
+        self.assertFalse(success)
+        self.assertEqual(result["orca/coordinator"], "checkout-changed")
+        self.assertEqual(self.git(self.coordinator, "symbolic-ref", "HEAD").strip(), "refs/heads/unrelated")
+        self.assertEqual(self.git(self.coordinator, "rev-parse", "HEAD").strip(), self.original)
+        self.assertEqual((self.coordinator / "tracked.txt").read_text(), "Initial\n")
+
+    def test_preserves_ignored_file_at_incoming_path(self):
+        (self.primary / ".git/info/exclude").write_text("cache.txt\n")
+        (self.coordinator / "cache.txt").write_text("Local ignored data")
+        (self.upstream / "cache.txt").write_text("Incoming tracked file")
+        self.git(self.upstream, "add", "cache.txt")
+        self.commit(self.upstream, "Merged PR")
+        success, result = self.sync()
+        self.assertFalse(success)
+        self.assertEqual(result["orca/coordinator"], "local-changes")
+        self.assertEqual((self.coordinator / "cache.txt").read_text(), "Local ignored data")
+        self.assertEqual(self.git(self.coordinator, "rev-parse", "HEAD").strip(), self.original)
+
     def test_does_not_move_diverged_coordinator(self):
         local = self.commit(self.coordinator, "Local coordinator commit")
         target = self.commit(self.upstream, "Merged PR")

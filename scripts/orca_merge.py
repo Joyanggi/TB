@@ -37,26 +37,49 @@ def run(*argv):
     return subprocess.run(argv, check=True, text=True, stdout=subprocess.PIPE).stdout
 
 
+def overwrites_ignored(git, ref, target):
+    def paths(*args):
+        output = run(*git, *args).rstrip("\0")
+        return {unicodedata.normalize("NFC", path).casefold() for path in output.split("\0") if path}
+
+    incoming = paths("diff", "--name-only", "--no-renames", "--diff-filter=AT", "-z", ref, target)
+    if not incoming:
+        return False
+    ignored = paths("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+    def has_parent(paths, candidates):
+        return any(parent.as_posix() in candidates for path in paths for parent in PurePosixPath(path).parents)
+
+    return bool(ignored & incoming) or has_parent(ignored, incoming) or has_parent(incoming, ignored)
+
+
 def sync_branch(branch, worktree, target):
     ref = f"refs/heads/{branch}"
-    if worktree is None:
-        # Local transport applies Git's fast-forward and checked-out branch checks.
-        run("git", "fetch", "--no-tags", "--no-write-fetch-head", ".", f"{target}:{ref}")
-        return "synced"
+    mode = "refuse"
+    if worktree is not None:
+        git = ("git", "-C", worktree)
+        if run(*git, "symbolic-ref", "--quiet", "HEAD").strip() != ref:
+            return "checkout-changed"
+        if run(*git, "status", "--porcelain", "--untracked-files=normal"):
+            return "local-changes"
+        if overwrites_ignored(git, ref, target):
+            return "local-changes"
+        mode = "updateInstead"
 
-    git = ("git", "-C", worktree)
-    if run(*git, "symbolic-ref", "--quiet", "HEAD").strip() != ref:
+    receiver = f"git -c core.hooksPath=/dev/null -c receive.denyCurrentBranch={mode} receive-pack"
+    # Address the branch explicitly so a concurrent checkout cannot move an unrelated ref.
+    run("git", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always",
+        "push", "--no-verify", "--no-follow-tags", "--no-signed", "--no-recurse-submodules",
+        f"--receive-pack={receiver}", "./", f"{target}:{ref}")
+    if worktree is not None and run(*git, "symbolic-ref", "--quiet", "HEAD").strip() != ref:
         return "checkout-changed"
-    if run(*git, "status", "--porcelain", "--untracked-files=normal"):
-        return "local-changes"
-    run(*git, "merge", "--ff-only", "--no-overwrite-ignore", target)
-    return "synced" if run(*git, "rev-parse", "HEAD").strip() == target else "local-commits"
+    return "synced" if run("git", "rev-parse", "--verify", ref).strip() == target else "local-commits"
 
 
 def sync_main():
     if run("git", "symbolic-ref", "--quiet", "HEAD").strip() != f"refs/heads/{COORDINATOR}":
         raise Blocked("Run synchronization from the TrustBite coordinator worktree.")
 
+    coordinator = run("git", "rev-parse", "--show-toplevel").rstrip("\n")
     origin = run("git", "remote", "get-url", "origin").strip()
     repository = run("gh", "repo", "view", origin, "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     if repository.strip().casefold() != REPO.casefold():
@@ -72,11 +95,7 @@ def sync_main():
             worktrees[fields["branch"]] = fields["worktree"]
 
     result = {}
-    for branch in (BASE, COORDINATOR):
-        worktree = worktrees.get(f"refs/heads/{branch}")
-        if branch == COORDINATOR and worktree is None:
-            result[branch] = "checkout-changed"
-            continue
+    for branch, worktree in ((BASE, worktrees.get(f"refs/heads/{BASE}")), (COORDINATOR, coordinator)):
         try:
             result[branch] = sync_branch(branch, worktree, target)
         except subprocess.CalledProcessError:
