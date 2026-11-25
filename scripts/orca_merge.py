@@ -4,11 +4,13 @@
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 import unicodedata
 from contextlib import contextmanager, nullcontext
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 
 
 REPO = "Joyanggi/TB"
@@ -37,39 +39,57 @@ def run(*argv):
     return subprocess.run(argv, check=True, text=True, stdout=subprocess.PIPE).stdout
 
 
-def overwrites_ignored(git, ref, target):
-    def paths(*args):
-        output = run(*git, *args).rstrip("\0")
-        return {unicodedata.normalize("NFC", path).casefold() for path in output.split("\0") if path}
+def update_local_branch(ref, worktree, target, hooks):
+    mode = "refuse"
+    if worktree is not None:
+        mode = "updateInstead"
+        hook = Path(hooks) / "push-to-checkout"
+        # Git's default updateInstead deployment can overwrite ignored files.
+        # The named local receiver uses this hook to apply an indexed patch instead.
+        hook.write_text(
+            f"""#!/bin/bash
+set -euo pipefail
+cd "$GIT_WORK_TREE"
+test "$(pwd -P)" = {shlex.quote(str(Path(worktree).resolve()))}
+test "$(git symbolic-ref --quiet HEAD)" = {shlex.quote(ref)}
+for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply sequencer
+do
+    state_path=$(git rev-parse --git-path "$state")
+    test ! -e "$state_path"
+done
+status=$(git status --porcelain --untracked-files=normal --ignore-submodules=none)
+test -z "$status"
+base=$(git rev-parse --verify HEAD)
+git merge-base --is-ancestor "$base" "$1"
+git diff --binary --full-index --no-renames --no-ext-diff --no-textconv --no-color --submodule=short \
+    --src-prefix=a/ --dst-prefix=b/ "$base" "$1" -- |
+    git apply --index --allow-empty --whitespace=nowarn
+""",
+            encoding="utf-8",
+        )
+        hook.chmod(0o700)
 
-    incoming = paths("diff", "--name-only", "--no-renames", "--diff-filter=AT", "-z", ref, target)
-    if not incoming:
-        return False
-    ignored = paths("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
-    def has_parent(paths, candidates):
-        return any(parent.as_posix() in candidates for path in paths for parent in PurePosixPath(path).parents)
-
-    return bool(ignored & incoming) or has_parent(ignored, incoming) or has_parent(incoming, ignored)
+    # Address the branch explicitly so a concurrent checkout cannot move an unrelated ref.
+    receiver = (
+        f"git -c core.hooksPath={shlex.quote(hooks)} -c receive.denyCurrentBranch={mode} "
+        "-c receive.denyNonFastForwards=true receive-pack"
+    )
+    run("git", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always",
+        "push", "--no-verify", "--no-follow-tags", "--no-signed", "--no-recurse-submodules",
+        f"--receive-pack={receiver}", "./", f"{target}:{ref}")
 
 
 def sync_branch(branch, worktree, target):
     ref = f"refs/heads/{branch}"
-    mode = "refuse"
     if worktree is not None:
         git = ("git", "-C", worktree)
         if run(*git, "symbolic-ref", "--quiet", "HEAD").strip() != ref:
             return "checkout-changed"
-        if run(*git, "status", "--porcelain", "--untracked-files=normal"):
+        if run(*git, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"):
             return "local-changes"
-        if overwrites_ignored(git, ref, target):
-            return "local-changes"
-        mode = "updateInstead"
 
-    receiver = f"git -c core.hooksPath=/dev/null -c receive.denyCurrentBranch={mode} receive-pack"
-    # Address the branch explicitly so a concurrent checkout cannot move an unrelated ref.
-    run("git", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always",
-        "push", "--no-verify", "--no-follow-tags", "--no-signed", "--no-recurse-submodules",
-        f"--receive-pack={receiver}", "./", f"{target}:{ref}")
+    with TemporaryDirectory(prefix="tb-sync-") as hooks:
+        update_local_branch(ref, worktree, target, hooks)
     if worktree is not None and run(*git, "symbolic-ref", "--quiet", "HEAD").strip() != ref:
         return "checkout-changed"
     return "synced" if run("git", "rev-parse", "--verify", ref).strip() == target else "local-commits"

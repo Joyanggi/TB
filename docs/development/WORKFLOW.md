@@ -46,7 +46,7 @@ orca agent launch --environment local --worktree 'branch:orca/coordinator' \
 /opt/homebrew/bin/tb-orca-merge --sync-main
 ```
 
-실행기는 `origin/main`의 한 커밋을 기준으로 로컬 `main`과 `orca/coordinator`를 각각 fast-forward합니다. 다른 worktree가 쓰는 `main`은 해당 폴더에서 갱신합니다. 미커밋 변경, 로컬 커밋 또는 Git의 안전 검사에 걸린 브랜치는 그 상태를 남깁니다. `orca/coordinator`가 동기화되지 않으면 마스터가 원인을 보고하고 새 작업 시작을 보류합니다. 로컬 `main`만 보류됐으면 마스터와 새 작업자의 기준은 확인된 `origin/main`을 사용합니다.
+실행기는 `origin/main`의 한 커밋을 기준으로 로컬 `main`과 `orca/coordinator`를 각각 fast-forward합니다. 다른 worktree가 쓰는 `main`은 해당 폴더에서 갱신합니다. 미커밋 변경, 로컬 커밋, 진행 중인 병합, 로컬 파일 충돌 등 Git의 안전 검사에 걸린 브랜치는 그 상태를 남깁니다. `orca/coordinator`가 동기화되지 않으면 마스터가 원인을 보고하고 새 작업 시작을 보류합니다. 로컬 `main`만 보류됐으면 마스터와 새 작업자의 기준은 확인된 `origin/main`을 사용합니다.
 
 ## 사용량 한도와 작업 재개
 

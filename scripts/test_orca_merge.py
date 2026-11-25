@@ -101,17 +101,54 @@ class SyncMainTests(unittest.TestCase):
         self.assertEqual(self.git(self.coordinator, "rev-parse", "HEAD").strip(), self.original)
         self.assertEqual((self.coordinator / "tracked.txt").read_text(), "Initial\n")
 
-    def test_preserves_ignored_file_at_incoming_path(self):
+    def test_preserves_ignored_file_created_after_preflight(self):
         (self.primary / ".git/info/exclude").write_text("cache.txt\n")
-        (self.coordinator / "cache.txt").write_text("Local ignored data")
         (self.upstream / "cache.txt").write_text("Incoming tracked file")
         self.git(self.upstream, "add", "cache.txt")
         self.commit(self.upstream, "Merged PR")
+        git = self.git
+
+        def create_ignored_file_after_status(checkout, *args):
+            result = git(checkout, *args)
+            if (args[:1] == ("-C",) and args[2:4] == ("status", "--porcelain")
+                    and Path(args[1]).resolve() == self.coordinator.resolve()):
+                (self.coordinator / "cache.txt").write_text("Local ignored data")
+            return result
+
+        with patch.object(self, "git", side_effect=create_ignored_file_after_status):
+            success, result = self.sync()
+        self.assertFalse(success)
+        self.assertEqual(result["orca/coordinator"], "git-refused")
+        self.assertEqual((self.coordinator / "cache.txt").read_text(), "Local ignored data")
+        self.assertEqual((self.coordinator / "tracked.txt").read_text(), "Initial\n")
+        self.assertEqual(self.git(self.coordinator, "rev-parse", "HEAD").strip(), self.original)
+
+    def test_preserves_pending_merge_with_clean_status(self):
+        self.git(self.coordinator, "switch", "-c", "topic")
+        self.git(self.coordinator, "commit", "--allow-empty", "-qm", "Empty topic")
+        self.git(self.coordinator, "switch", "orca/coordinator")
+        self.git(self.coordinator, "merge", "--no-ff", "--no-commit", "topic")
+        merge_head = self.git(self.coordinator, "rev-parse", "MERGE_HEAD")
+        self.assertEqual(self.git(self.coordinator, "status", "--porcelain"), "")
+        self.commit(self.upstream, "Merged PR")
         success, result = self.sync()
         self.assertFalse(success)
-        self.assertEqual(result["orca/coordinator"], "local-changes")
-        self.assertEqual((self.coordinator / "cache.txt").read_text(), "Local ignored data")
+        self.assertEqual(result["orca/coordinator"], "git-refused")
+        self.assertEqual(self.git(self.coordinator, "rev-parse", "MERGE_HEAD"), merge_head)
         self.assertEqual(self.git(self.coordinator, "rev-parse", "HEAD").strip(), self.original)
+
+    def test_fast_forwards_binary_files_and_empty_commits(self):
+        data = b"\x00\x01binary\xff"
+        (self.upstream / "asset.bin").write_bytes(data)
+        self.git(self.upstream, "add", "asset.bin")
+        self.commit(self.upstream, "Add asset")
+        self.assertTrue(self.sync()[0])
+        self.assertEqual((self.coordinator / "asset.bin").read_bytes(), data)
+        self.git(self.upstream, "commit", "--allow-empty", "-qm", "Empty upstream commit")
+        self.assertTrue(self.sync()[0])
+        self.assertEqual(self.git(self.coordinator, "rev-parse", "HEAD"),
+                         self.git(self.upstream, "rev-parse", "HEAD"))
+        self.assertEqual(self.git(self.coordinator, "status", "--porcelain"), "")
 
     def test_does_not_move_diverged_coordinator(self):
         local = self.commit(self.coordinator, "Local coordinator commit")
