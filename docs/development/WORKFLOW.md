@@ -31,7 +31,13 @@ orca agent launch --environment local --worktree "path:$(git rev-parse --show-to
 트바 마스터가 새 Run을 시작하기 전과 GitHub PR의 실제 병합을 확인한 뒤에, 로컬 `main`을 `origin/main`으로 fast-forward합니다. GitHub 웹에서 병합한 변경은 다음 요청을 시작할 때 반영합니다.
 
 1. 트바의 로컬 `main` 워크트리에서 `git branch --show-current`와 `git status`를 확인합니다. 브랜치가 `main`이고 워크트리가 깨끗하며 진행 중인 Git 작업이 없을 때 갱신합니다.
-2. `git fetch origin main` 직후 `git rev-parse --verify 'FETCH_HEAD^{commit}'`으로 가져온 커밋의 전체 해시를 기록합니다. 이후 단계에서는 이 해시를 그대로 사용합니다. `git log --oneline <가져온 SHA>..HEAD`에 출력이 있으면 로컬 커밋을 보존하고 갱신을 보류합니다. PR 병합 직후에는 `git merge-base --is-ancestor -- <병합 SHA> <가져온 SHA>`가 성공해야 합니다.
+2. 아래 명령으로 GitHub `main`을 현재 워크트리의 전용 참조에 가져옵니다. fetch가 성공하면 `git rev-parse --verify 'refs/worktree/tb-main-sync^{commit}'`으로 가져온 커밋의 전체 해시를 기록합니다.
+
+   ```sh
+   git fetch --no-tags --no-recurse-submodules --no-write-fetch-head origin refs/heads/main:refs/worktree/tb-main-sync
+   ```
+
+   이후 단계에서는 이 해시를 그대로 사용합니다. `git log --oneline <가져온 SHA>..HEAD`에 출력이 있으면 로컬 커밋을 보존하고 갱신을 보류합니다. PR 병합 직후에는 `git merge-base --is-ancestor -- <병합 SHA> <가져온 SHA>`가 성공해야 합니다.
 3. `git branch --show-current`와 `git status`를 다시 확인한 뒤 아래 명령의 자리표시자를 기록한 전체 해시로 바꿔 실행합니다. 같은 워크트리에서 수동으로 브랜치를 전환하거나 파일을 변경하는 작업과 겹치지 않게 진행합니다.
 
    ```sh

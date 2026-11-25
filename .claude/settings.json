@@ -41,6 +41,7 @@
       "Bash(git status *)",
       "Bash(git branch --show-current)",
       "Bash(git fetch origin main)",
+      "Bash(git fetch --no-tags --no-recurse-submodules --no-write-fetch-head origin refs/heads/main:refs/worktree/tb-main-sync)",
       "Bash(git merge-base --is-ancestor -- *)",
       "Bash(git merge --ff-only --no-squash --no-overwrite-ignore --no-autostash -- *)",
       "Bash(git push origin *:refs/heads/orca/*)",
